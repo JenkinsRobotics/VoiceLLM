@@ -1,0 +1,95 @@
+# Milestones — build order
+
+Each milestone is a single runnable command that *demonstrates* a working
+behavior. Don't move on until the previous demo runs reliably.
+
+## M0 — Repo wiring (no behavior change)
+
+Goal: docs in place, requirements installable, models verified.
+
+- [x] `docs/` written.
+- [ ] `pip install -r 04_SOFTWARE/requirements.txt` succeeds in a fresh venv.
+  Add to that file: `mlx-lm`, `llama-cpp-python`, `kokoro>=0.9.4`, `scipy`.
+- [ ] Sanity script `docs/check_models.py` (small) prints which model paths
+      exist on this machine and their sizes. Useful before debugging.
+
+Demo: `python -c "from llm.backend_base import BackendBase; print('ok')"`.
+
+## M1 — Two CLI demos, ported in-place
+
+Goal: the *known good* MockingAgent demos run from inside VoiceLLM with
+the new module names. No behavior change.
+
+- [ ] `04_SOFTWARE/demos/cli_chat_mlx.py` — copy of
+      `MockingAgent/ollamacpp/chat_mlx.py`, points at the same MLX path.
+- [ ] `04_SOFTWARE/demos/cli_chat_llamacpp.py` — copy of
+      `MockingAgent/ollamacpp/chat_llama.py`, points at the same GGUF path.
+- [ ] `04_SOFTWARE/demos/voice_assistant_baseline.py` — copy of
+      `MockingAgent/voice_assistant.py`. Untouched — this is our regression
+      anchor.
+
+Demo: each script runs and produces a sensible reply.
+
+## M2 — Modular voice assistant, no barge-in
+
+Goal: the proven `voice_assistant.py` flow re-expressed through the bus +
+nodes, with **MLX as the default LLM** and Gemma 4 26B-A4B-4bit.
+
+- [ ] `llm/backend_base.py` — `BackendBase` ABC.
+- [ ] `llm/backend_mlx.py` — extracted from `chat_mlx.py:39-78`.
+- [ ] `llm/backend_llamacpp.py` — extracted from `chat_llama.py:39-77`.
+- [ ] `llm/llm_node.py` — rewrite to consume a `BackendBase` instance.
+- [ ] `tts/kokoro_node.py` — replace stub synth with real `KPipeline`,
+      port `clean_for_tts()` and the mic-pause coordination.
+- [ ] `stt/stt_two_pass.py` — port `voice_assistant.py:127-213` (the
+      VAD worker + 2-pass cascade) onto the bus.
+- [ ] `config.py` — add `LLM_BACKEND`, `MLX_PATH`, `GGUF_PATH`,
+      `STT_MODE = "two_pass"`, `KOKORO_VOICE`, voice prompts.
+- [ ] `main.py` — build bus, instantiate backend by config flag,
+      start orchestrator.
+
+Demo: `python 04_SOFTWARE/main.py` reproduces the MockingAgent voice
+assistant behavior, but switching `LLM_BACKEND="llamacpp"` swaps the
+backend without touching anything else.
+
+## M3 — Continuous hearing
+
+Goal: drop the wake word. STT transcribes constantly; any committed phrase
+becomes a turn.
+
+- [ ] `stt/stt_continuous.py` — port `always_listening_hybrid_phrase_word_pipeline.py`
+      onto the bus (publishes `stt.text` on each commit).
+- [ ] `config.py` flip: `STT_MODE = "continuous"`, `REQUIRE_WAKE_WORD = False`.
+- [ ] `orchestrator.py` — when `REQUIRE_WAKE_WORD = False`, every `stt.text`
+      becomes an `llm.request`. Add cooldown so a too-quick second commit
+      doesn't double-fire while we're still synthesizing the first reply.
+- [ ] Add `recent_assistant_reply` similarity filter (Layer C in
+      `05_barge_in_and_self_speech.md`).
+
+Demo: speak naturally, get a reply, keep talking, get another reply, no
+"hey jaeger" needed. Background TV doesn't trigger the LLM (verified by
+running it alongside a YouTube video for 5 minutes — `outputs/` log).
+
+## M4 — Barge-in
+
+Goal: interrupt the assistant by talking over it.
+
+- [ ] AEC turned on by default (`AEC_ENABLED = True`).
+- [ ] Run VAD on AEC-cleaned audio, not raw mic.
+- [ ] `tts.cancel` path through `KokoroNode` (clear queue, `sd.stop()`).
+- [ ] `backend.cancel()` plumbed through `LLMNode` so token generation
+      stops too.
+- [ ] Sustained-voice guard (≥150 ms) and start-grace (250 ms) before
+      declaring barge-in.
+
+Demo: while the assistant is mid-reply, talk over it. It cuts off within
+~150 ms and processes the new utterance.
+
+## M5 — Polish
+
+- [ ] Latency dashboard (`metrics.csv` already exists; add a tiny live
+      printout: VAD-close → TTFT → first-audio).
+- [ ] Voice picker (`config.KOKORO_VOICE`).
+- [ ] System-prompt presets (assistant, narrator, "thinking out loud").
+- [ ] Optional GUI: there's a PySide6 demo in MockingAgent we can adapt
+      if a GUI is wanted. Not required for daily use.

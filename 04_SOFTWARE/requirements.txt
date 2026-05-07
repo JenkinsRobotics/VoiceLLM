@@ -1,0 +1,18 @@
+# ── Core / shared ──────────────────────────────────────────────
+numpy>=1.26
+scipy
+sounddevice>=0.4.6
+
+# ── LLM backends (one is enough; both supported) ───────────────
+mlx-lm; sys_platform == "darwin" and platform_machine == "arm64"
+llama-cpp-python
+
+# ── STT (whisper.cpp + WebRTC VAD) ─────────────────────────────
+pywhispercpp
+webrtcvad-wheels
+
+# ── TTS (Kokoro) ───────────────────────────────────────────────
+kokoro>=0.9.4
+
+# ── Optional: AEC for barge-in (M4) ────────────────────────────
+speexdsp
