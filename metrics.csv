@@ -1,0 +1,7 @@
+wake→listen(ms),listen dur(ms),stt→1st_token(ms),1st→tts_start(ms),tts dur(ms),e2e wake→tts_end(ms),tokens,tok/s,stt_text
+0,0,5180,0,3329,8508,0,0.0,Hello?
+0,0,785,0,51474,52259,0,0.0,"Uh, can you tell me a story? Or a joke?"
+0,0,1074,0,8477,9551,0,0.0,Can you tell me today's date?
+0,0,1071,0,19237,20308,0,0.0,What AI model are you using?
+0,0,1141,0,20744,21885,0,0.0,Are you not Gemma?
+0,0,1315,0,11478,12793,0,0.0,"No, that's it. Thank you."

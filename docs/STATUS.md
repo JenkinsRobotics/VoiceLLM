@@ -4,7 +4,8 @@
 [06_milestones.md](06_milestones.md) for the milestone definitions and
 [01_architecture.md](01_architecture.md) for the module/bus layout.
 
-Last updated: **2026-05-07**, end of M2.
+Last updated: **2026-05-07**. M2 complete; M3 quick path code-complete (runtime
+verification pending).
 
 ---
 
@@ -23,6 +24,12 @@ Kokoro TTS. State + routing through a Pub/Sub `Bus`.
 **M2 status: complete.** A wake-word voice assistant runs end-to-end with the
 new modular layout, and the LLM backend swaps between MLX and llama.cpp via
 one config flag.
+
+**M3 status (quick path): code-complete.** `REQUIRE_WAKE_WORD = False` is now
+the default, the orchestrator runs a self-speech similarity filter and a
+single-slot pending-turn queue, and every STT decision is logged to
+`outputs/m3_eval.jsonl`. The 5-min YouTube background-dialogue verification
+called for in step 5 has not yet been run on hardware.
 
 ---
 
@@ -114,26 +121,53 @@ GITHUB/
 **Drop the wake word.** STT runs always-on; every committed phrase becomes
 a turn unless we filter it out. This is the "ChatGPT Voice" feel.
 
-1. **Port a continuous pipeline** to `stt/stt_continuous.py`. Default to the
-   **hybrid phrase/word** strategy from
-   [always_listening_hybrid_phrase_word_pipeline.py](../../../MockingAgent/PywisperCpp/pywhispercpp_examples/llm_listener/always_listening_hybrid_phrase_word_pipeline.py)
-   per [02_stt_pipelines.md](02_stt_pipelines.md). Same node interface as
-   `STTTwoPassNode` (publishes `stt.text`, has `start`/`stop`/`set_paused`).
-2. **`make_stt()` in `main.py`** already has the dispatch hook — add the
-   `STT_MODE == "continuous"` branch.
-3. **Self-speech similarity filter** on `stt.text` ingress in the
-   orchestrator: if the candidate text is `>0.75` similar to the most recent
-   `assistant` turn in `LLMNode.history_snapshot()`, drop it. (The mic-pause
-   already handles 95% of cases; this is for the residual 5%.)
-4. **Cooldown**: if a second `stt.text` arrives within ~600 ms of one already
-   being processed, queue it instead of dropping it. Prevents double-fires
-   while we're still synthesizing the first reply.
-5. **Verification**: run alongside a YouTube video for 5 minutes; the LLM
-   should not fire on background dialogue. Log to `outputs/m3_eval.jsonl`.
+We split this into a **quick path** (lean on the existing two-pass STT) and
+**M3.5** (build the hybrid pipeline node for lower latency / better feel).
 
-The current orchestrator drops new `stt.text` messages while a turn is in
-flight ([orchestrator.py:80-83](../orchestrator/orchestrator.py)) — that's
-a placeholder; M4's barge-in path replaces it with cancellation.
+#### M3 quick path — code-complete
+
+1. ✅ **`REQUIRE_WAKE_WORD = False`** in [config.py](../config.py). The
+   existing `STTTwoPassNode` already has the no-wake-word branch
+   ([stt_two_pass.py:294-297](../stt/stt_two_pass.py#L294-L297)) — every
+   phrase becomes a turn.
+2. ✅ **Self-speech similarity filter** on `stt.text` ingress in the
+   orchestrator. Compares incoming text against the most recent `assistant`
+   turn from `LLMNode.history_snapshot()` via `difflib.SequenceMatcher`;
+   drops if `>= cfg.SELF_SPEECH_SIMILARITY_THRESHOLD` (default 0.75). See
+   [orchestrator.py:_sounds_like_self](../orchestrator/orchestrator.py#L137-L146).
+3. ✅ **Pending-turn queue** replaces the old "drop while busy" placeholder.
+   Single-slot, last-write-wins; fires when `_on_tts_done` returns to IDLE,
+   provided the queued utterance is younger than `cfg.PENDING_TURN_MAX_AGE_S`
+   (default 3.0 s). See
+   [orchestrator.py:_on_tts_done](../orchestrator/orchestrator.py#L176-L197).
+4. ✅ **Eval logging** — every STT decision (`accepted` /
+   `dropped_self_echo` / `queued_pending` / `pending_fired` / `pending_stale`)
+   is appended to `outputs/m3_eval.jsonl` for offline review. Disable by
+   setting `cfg.M3_EVAL_LOG = None`.
+
+#### M3 quick path — verification still owed
+
+- [ ] **Run alongside a YouTube video for 5 minutes.** The LLM should not
+  fire on background dialogue. Inspect `outputs/m3_eval.jsonl` afterwards;
+  expect `dropped_self_echo` for assistant playback and a few `accepted`
+  for real user turns. Tune `SELF_SPEECH_SIMILARITY_THRESHOLD` if false
+  positives slip through.
+- [ ] **Sanity check on the barge-in placeholder** — until M4 ships, talking
+  over the assistant queues your follow-up rather than interrupting; that
+  reads in the log as `queued_pending` → `pending_fired`.
+
+#### M3.5 — Hybrid phrase/word STT node
+
+Only do this once the quick path is verified and we hit a quality wall the
+filter+queue can't paper over (e.g. trailing-word loss on long sentences).
+
+1. **Port** [always_listening_hybrid_phrase_word_pipeline.py](../../../MockingAgent/PywisperCpp/pywhispercpp_examples/llm_listener/always_listening_hybrid_phrase_word_pipeline.py)
+   to `stt/stt_continuous.py`. Same node interface as `STTTwoPassNode`
+   (publishes `stt.text`, has `start`/`stop`/`set_paused`/`open_followup`).
+2. **`make_stt()` in `main.py`** — add the `STT_MODE == "continuous"`
+   branch (the dispatch hook already exists).
+3. Re-run the YouTube verification; compare false-positive rate vs. the
+   quick path before declaring it the new default.
 
 ### M4 — Barge-in
 

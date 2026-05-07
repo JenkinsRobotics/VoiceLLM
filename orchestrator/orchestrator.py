@@ -11,12 +11,24 @@ Flow per turn:
   5. TTS publishes ``mic.pause(True)`` while speaking, ``mic.pause(False)``
      and ``tts.done`` when its audio queue empties.
   6. Orchestrator: write metrics, open the STT follow-up window, state = IDLE.
+
+M3 additions:
+  • Self-speech filter — drop incoming ``stt.text`` that's too similar to the
+    most recent assistant reply (the mic catching the speaker through the air).
+  • Pending-turn queue — when an utterance arrives mid-turn, store it (one
+    slot, last-write-wins) and fire it as soon as we go idle, provided it's
+    not too stale. M4's barge-in path will replace this with cancellation.
 """
 
 from __future__ import annotations
 
+import json
 import threading
+import time
+from difflib import SequenceMatcher
+from pathlib import Path
 
+import config as cfg
 from core.bus import Bus
 from core.metrics import MetricsLog, TurnMetrics, now
 from core.state import State, SysState
@@ -34,6 +46,17 @@ class Orchestrator:
         self.cur: TurnMetrics | None = None
         self._stop = threading.Event()
         self._llm_thread: threading.Thread | None = None
+
+        # M3: pending-turn slot (single-slot, last-write-wins).
+        self._pending_text: str | None = None
+        self._pending_ts: float = 0.0
+
+        # M3: optional eval log for offline review.
+        self._eval_log_path: Path | None = (
+            Path(cfg.M3_EVAL_LOG) if cfg.M3_EVAL_LOG else None
+        )
+        if self._eval_log_path is not None:
+            self._eval_log_path.parent.mkdir(parents=True, exist_ok=True)
 
     # ── Lifecycle ──────────────────────────────────────────────────────
 
@@ -79,12 +102,25 @@ class Orchestrator:
         if not text:
             return
 
-        # Drop user phrases that arrive while a turn is already in flight.
-        # M4 will replace this with a barge-in path (cancel LLM + TTS).
-        if self.state.value != SysState.IDLE:
-            print(f"[busy — dropped] {text!r}", flush=True)
+        is_echo, ratio = self._sounds_like_self(text)
+        if is_echo:
+            print(f"[self-echo dropped sim={ratio:.2f}] {text!r}", flush=True)
+            self._log_eval(text, "dropped_self_echo", similarity=ratio)
             return
 
+        # Busy: queue this utterance; fire it when the current turn ends.
+        # Last-write-wins so a quick re-ask supersedes an older pending one.
+        if self.state.value != SysState.IDLE:
+            self._pending_text = text
+            self._pending_ts = time.time()
+            print(f"[queued] {text!r}", flush=True)
+            self._log_eval(text, "queued_pending")
+            return
+
+        self._log_eval(text, "accepted")
+        self._start_turn(text)
+
+    def _start_turn(self, text: str) -> None:
         self.cur = TurnMetrics()
         self.cur.wake_ts = now()
         self.cur.listen_start_ts = self.cur.wake_ts
@@ -97,6 +133,28 @@ class Orchestrator:
             target=self.llm.ask_stream, args=(text,), daemon=True
         )
         self._llm_thread.start()
+
+    def _sounds_like_self(self, text: str) -> tuple[bool, float]:
+        """Compare text to the most recent assistant reply in LLM history."""
+        snap = self.llm.history_snapshot()
+        for msg in reversed(snap):
+            if msg.get("role") == "assistant" and msg.get("content"):
+                ratio = SequenceMatcher(
+                    None, text.lower(), msg["content"].lower()
+                ).ratio()
+                return ratio >= cfg.SELF_SPEECH_SIMILARITY_THRESHOLD, ratio
+        return False, 0.0
+
+    def _log_eval(self, text: str, decision: str, **extra) -> None:
+        if self._eval_log_path is None:
+            return
+        record = {"t": time.time(), "decision": decision, "text": text, **extra}
+        try:
+            with self._eval_log_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=True) + "\n")
+        except OSError:
+            # Best-effort logging — never let it break the conversation loop.
+            pass
 
     def _on_llm_token(self, delta: str) -> None:
         if self.cur and not self.cur.llm_first_token_ts:
@@ -122,4 +180,18 @@ class Orchestrator:
             self.cur = None
         self.state.set(SysState.IDLE)
         # Open a wake-word-free follow-up window for the next utterance.
+        # (No-op when REQUIRE_WAKE_WORD = False — STT is already always-on.)
         self.stt.open_followup()
+
+        # M3: drain the pending-turn slot if something arrived mid-turn.
+        if self._pending_text is not None:
+            text = self._pending_text
+            age = time.time() - self._pending_ts
+            self._pending_text = None
+            if age <= cfg.PENDING_TURN_MAX_AGE_S:
+                print(f"[pending → fire age={age:.2f}s]", flush=True)
+                self._log_eval(text, "pending_fired", age=age)
+                self._on_stt_text(text)
+            else:
+                print(f"[pending dropped age={age:.2f}s] {text!r}", flush=True)
+                self._log_eval(text, "pending_stale", age=age)

@@ -36,13 +36,32 @@ STT_MODE = "two_pass"          # "two_pass" (M2) | "continuous" (M3)
 STT_FAST_MODEL = "base.en"
 STT_ACCURATE_MODEL = "medium.en"
 
-# ── Wake words (used in two_pass mode) ─────────────────────────────────
-REQUIRE_WAKE_WORD = True
+# ── Wake words (used in two_pass mode when REQUIRE_WAKE_WORD = True) ───
+# M3 default: continuous hearing — every committed phrase becomes a turn.
+# Set to True to restore Google-Home-style wake-word gating.
+REQUIRE_WAKE_WORD = False
 WAKE_PREFIXES = ("ok", "okay", "hey")
 ASSISTANT_NAMES = ("jaeger", "yeager", "yager", "jager")
 WAKE_PHRASES = tuple(f"{p} {n}" for p in WAKE_PREFIXES for n in ASSISTANT_NAMES)
 WAKE_MATCH_THRESHOLD = 0.78
 FOLLOWUP_WINDOW_S = 10.0
+
+# ── M3 continuous-mode guards ──────────────────────────────────────────
+# Self-speech filter: if an STT commit is >= this similar to the most
+# recent assistant reply, drop it. Catches the residual cases where the
+# mic picks up the assistant's own voice through the speaker.
+SELF_SPEECH_SIMILARITY_THRESHOLD = 0.75
+
+# Pending-turn cooldown: if a second stt.text arrives while a turn is in
+# flight, store it and fire it once we go idle (instead of dropping). The
+# stored phrase is discarded if it's older than this many seconds when the
+# current turn finishes — by then the user has likely moved on.
+PENDING_TURN_MAX_AGE_S = 3.0
+
+# M3 evaluation log. Set to None to disable. When set, every stt.text
+# decision (accepted / dropped-self-echo / queued-as-pending / dropped-stale)
+# is appended as one JSON line for offline review.
+M3_EVAL_LOG = "outputs/m3_eval.jsonl"
 
 # ── Audio capture (mic) ────────────────────────────────────────────────
 SAMPLE_RATE = 16000

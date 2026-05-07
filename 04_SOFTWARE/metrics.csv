@@ -1,1 +1,0 @@
-wake→listen(ms),listen dur(ms),stt→1st_token(ms),1st→tts_start(ms),tts dur(ms),e2e wake→tts_end(ms),tokens,tok/s,stt_text
