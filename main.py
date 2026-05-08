@@ -11,6 +11,7 @@ from llm.backend_llamacpp import LlamaCppBackend
 from llm.backend_mlx import MLXBackend
 from llm.llm_node import LLMNode
 from orchestrator.orchestrator import Orchestrator
+from stt.stt_continuous import STTContinuousNode
 from stt.stt_two_pass import STTTwoPassNode
 from tts.kokoro_node import KokoroNode
 
@@ -48,6 +49,25 @@ def make_stt(bus: Bus):
             max_speech_ms=cfg.MAX_SPEECH_MS,
             input_device=cfg.INPUT_DEVICE,
         )
+    if cfg.STT_MODE == "continuous":
+        return STTContinuousNode(
+            bus,
+            model_name=cfg.STT_CONTINUOUS_MODEL,
+            require_wake_word=cfg.REQUIRE_WAKE_WORD,
+            wake_phrases=cfg.WAKE_PHRASES,
+            wake_match_threshold=cfg.WAKE_MATCH_THRESHOLD,
+            followup_window_s=cfg.FOLLOWUP_WINDOW_S,
+            sample_rate=cfg.SAMPLE_RATE,
+            block_ms=cfg.STT_BLOCK_MS,
+            phrase_timeout_s=cfg.STT_PHRASE_TIMEOUT_S,
+            max_phrase_s=cfg.STT_MAX_PHRASE_S,
+            transcribe_every_s=cfg.STT_TRANSCRIBE_EVERY_S,
+            min_transcribe_s=cfg.STT_MIN_TRANSCRIBE_S,
+            energy_threshold=cfg.STT_ENERGY_THRESHOLD,
+            post_padding_ms=cfg.POST_PADDING_MS,
+            duplicate_similarity=cfg.STT_DUPLICATE_SIMILARITY,
+            input_device=cfg.INPUT_DEVICE,
+        )
     raise NotImplementedError(f"STT_MODE={cfg.STT_MODE!r} not implemented yet")
 
 
@@ -64,6 +84,7 @@ def main() -> int:
         max_tokens=cfg.LLM_MAX_TOKENS,
         temperature=cfg.LLM_TEMPERATURE,
         top_p=cfg.LLM_TOP_P,
+        max_history_turns=cfg.MAX_HISTORY_TURNS,
     )
     llm.load_and_warm()
 

@@ -36,6 +36,7 @@ class LLMNode:
         max_tokens: int,
         temperature: float,
         top_p: float,
+        max_history_turns: int = 8,
     ) -> None:
         self.bus = bus
         self.backend = backend
@@ -43,8 +44,19 @@ class LLMNode:
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.top_p = top_p
+        self.max_history_turns = max_history_turns
         self.history: list[dict] = [{"role": "system", "content": system}]
         self._lock = threading.Lock()
+
+    def _trim_history_locked(self) -> None:
+        """Cap rolling history to max_history_turns user/assistant pairs.
+        Caller must hold self._lock. Ported from voice_assistant.py:258-263.
+        """
+        if self.max_history_turns <= 0:
+            return
+        keep_msgs = 1 + self.max_history_turns * 2  # system + N pairs
+        if len(self.history) > keep_msgs:
+            self.history = self.history[:1] + self.history[-self.max_history_turns * 2:]
 
     def load_and_warm(self) -> None:
         self.backend.load()
@@ -84,4 +96,5 @@ class LLMNode:
                 # Store the cleaned reply so future turns aren't poisoned by
                 # markdown the model might have emitted.
                 self.history.append({"role": "assistant", "content": reply_clean})
+                self._trim_history_locked()
             self.bus.publish("llm.done", reply_clean)

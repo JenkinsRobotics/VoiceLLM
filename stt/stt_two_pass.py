@@ -139,6 +139,24 @@ def _normalize(text: str) -> str:
     return re.sub(r"[^a-z0-9 ]+", " ", text.lower()).strip()
 
 
+def _warm_stt(model, label: str, sample_rate: int) -> None:
+    """Run a 1.5-second silence transcription so the first real phrase doesn't
+    pay model setup cost. Ported from voice_assistant.py:341-353. Whisper
+    rejects audio under 1000 ms (it skips inference and warns), so we use 1.5
+    s to make sure the warm pass actually exercises the model."""
+    warm_audio = np.zeros(int(sample_rate * 1.5), dtype=np.float32)
+    print(f"[{label}] warming up...", flush=True)
+    t0 = time.perf_counter()
+    try:
+        list(model.transcribe(warm_audio, language="en"))
+    except Exception as exc:
+        # Some Whisper builds dislike pure silence; the model is still loaded
+        # and ready for real speech.
+        print(f"[{label}] warm-up skipped: {exc}", file=sys.stderr, flush=True)
+    else:
+        print(f"[{label}] primed ({time.perf_counter() - t0:.1f}s).", flush=True)
+
+
 class STTTwoPassNode:
     """Public node — owns the mic, the VAD worker, and both Whisper models."""
 
@@ -181,12 +199,24 @@ class STTTwoPassNode:
             no_context=True,
         )
         print(f"[stt-fast] Ready ({time.perf_counter() - t0:.1f}s).", flush=True)
+        _warm_stt(self._fast, "stt-fast", sample_rate)
 
-        # Lazy-load: don't pay the accurate model's cost unless we actually
-        # confirm a wake match.
-        self._STTModel = STTModel
-        self._accurate_name = accurate_model_name
-        self._accurate = None
+        # Eager-load the accurate model too. We used to defer it until the
+        # first wake-match, but in M3 mode (REQUIRE_WAKE_WORD=False) every
+        # phrase fires the accurate model anyway, so lazy just means "pay
+        # ~1 s extra on the first user turn". Pay it at startup instead.
+        print(f"[stt-accurate] Loading {accurate_model_name}...", flush=True)
+        t0 = time.perf_counter()
+        self._accurate = STTModel(
+            accurate_model_name,
+            print_realtime=False,
+            print_progress=False,
+            single_segment=True,
+            no_context=True,
+        )
+        print(f"[stt-accurate] Ready ({time.perf_counter() - t0:.1f}s).", flush=True)
+        _warm_stt(self._accurate, "stt-accurate", sample_rate)
+        self._sample_rate = sample_rate
 
         self.mic = MicStream(
             sample_rate=sample_rate,
@@ -256,17 +286,6 @@ class STTTwoPassNode:
         return False, ""
 
     def _accurate_transcribe(self, audio: np.ndarray) -> str:
-        if self._accurate is None:
-            print(f"[stt-accurate] Loading {self._accurate_name} (one-time)...", flush=True)
-            t0 = time.perf_counter()
-            self._accurate = self._STTModel(
-                self._accurate_name,
-                print_realtime=False,
-                print_progress=False,
-                single_segment=True,
-                no_context=True,
-            )
-            print(f"[stt-accurate] Ready ({time.perf_counter() - t0:.1f}s).", flush=True)
         segments = self._accurate.transcribe(audio, language="en")
         return " ".join(s.text for s in segments).strip()
 

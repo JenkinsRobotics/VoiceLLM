@@ -8,7 +8,9 @@ from __future__ import annotations
 from pathlib import Path
 
 # ── LLM backend selection ──────────────────────────────────────────────
-LLM_BACKEND = "mlx"  # "mlx" or "llamacpp"
+# llamacpp uses chat_completion which stops correctly on Gemma's
+# <end_of_turn>. mlx-lm needed a hand-rolled stop check (see backend_mlx.py).
+LLM_BACKEND = "llamacpp"  # "mlx" or "llamacpp"
 
 LMSTUDIO_MODELS = Path("/Users/jonathanjenkins/.lmstudio/models")
 MLX_PATH = LMSTUDIO_MODELS / "mlx-community" / "gemma-4-26b-a4b-4bit"
@@ -25,20 +27,71 @@ LLM_TEMPERATURE = 0.6
 LLM_TOP_P = 0.9
 LLM_GPU_LAYERS = -1  # llama.cpp: -1 = all on GPU
 
+# Cap history at this many user/assistant pairs (system prompt is preserved).
+# Ported from voice_assistant.py:258-263 — keeps prompt size bounded so
+# per-turn latency doesn't drift up over a long session.
+MAX_HISTORY_TURNS = 8
+
 SYSTEM_PROMPT = (
     "You are Jaeger, a local voice assistant running on this Mac. "
     "You are powered by Google's open-weight Gemma model running fully "
     "offline — not GPT, not ChatGPT, not Claude, no cloud API. "
-    "If asked what you are, say you are Jaeger running on Gemma. "
-    "Reply in 1 to 3 short sentences of natural conversational English. "
-    "No markdown, no lists, no code blocks, no emoji. "
-    "If unsure, say so briefly."
+    "If asked what you are, say you are Jaeger running on Gemma.\n\n"
+    "You receive transcriptions from an always-on microphone, so much of "
+    "what you hear is NOT directed at you — ambient speech, transcription "
+    "artifacts, single-word fragments, conversations between other "
+    "people, keystroke noise.\n\n"
+    "Begin EVERY reply with exactly one tag:\n"
+    "  <ignore>  — input is not addressed to you. Output the tag and "
+    "nothing else.\n"
+    "  <reply>   — input is a real directed turn for you. Follow the tag "
+    "with 1 to 3 short sentences of natural conversational English. No "
+    "markdown, lists, code blocks, or emoji. If unsure, say so briefly.\n\n"
+    "Examples:\n"
+    "  '[BLANK_AUDIO]' → <ignore>\n"
+    "  'test' → <ignore>\n"
+    "  'so anyway like I was telling her' → <ignore>\n"
+    "  'what time is it' → <reply>I can't read the system clock, but the "
+    "menu bar shows it.\n"
+    "  'hey jaeger tell me a joke' → <reply>Why did the developer go "
+    "broke? Their cache was empty."
 )
 
+# ── LLM-gated speech control ──────────────────────────────────────────
+# How many characters of LLM output to buffer before deciding the gate.
+# If neither <ignore> nor <reply> is seen by this length, default to
+# treating the output as a reply (the LLM forgot the protocol).
+LLM_GATE_BUFFER_CHARS = 30
+
 # ── STT ────────────────────────────────────────────────────────────────
-STT_MODE = "two_pass"          # "two_pass" (M2) | "continuous" (M3)
+STT_MODE = "two_pass"          # "two_pass" (M2/M3 quick path) | "continuous" (M3.5)
 STT_FAST_MODEL = "base.en"
 STT_ACCURATE_MODEL = "medium.en"
+
+# ── M3.5 continuous-mode STT (only read when STT_MODE == "continuous") ─
+# Single Whisper model for the rolling pipeline. base.en is the speed pick;
+# bump to "small.en" or "medium.en" if accuracy lags. Faithful port of
+# MockingAgent/.../always_listening_hybrid_phrase_word_pipeline.py defaults.
+STT_CONTINUOUS_MODEL = "base.en"
+
+# Mic chunk size for the continuous pipeline. Larger than the two_pass
+# FRAME_MS=30 because energy detection runs per-chunk and we want fewer
+# tiny chunks. 100 ms = 1600 samples @ 16 kHz.
+STT_BLOCK_MS = 100
+
+# Phrase boundaries.
+STT_PHRASE_TIMEOUT_S = 1.2     # quiet seconds that close a phrase
+STT_MAX_PHRASE_S = 12.0        # hard ceiling; matches MAX_SPEECH_MS=12000
+
+# Rolling re-transcription cadence. Smaller = snappier feel, more CPU.
+STT_TRANSCRIBE_EVERY_S = 1.0
+STT_MIN_TRANSCRIBE_S = 0.6     # don't transcribe shorter buffers
+
+# Activity detection — refreshes the phrase timer when RMS exceeds this.
+STT_ENERGY_THRESHOLD = 0.008
+
+# Duplicate-suppression on rolling and committed text.
+STT_DUPLICATE_SIMILARITY = 0.92
 
 # ── Wake words (used in two_pass mode when REQUIRE_WAKE_WORD = True) ───
 # M3 default: continuous hearing — every committed phrase becomes a turn.

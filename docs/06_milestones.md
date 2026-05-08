@@ -8,7 +8,7 @@ behavior. Don't move on until the previous demo runs reliably.
 Goal: docs in place, requirements installable, models verified.
 
 - [x] `docs/` written.
-- [ ] `pip install -r 04_SOFTWARE/requirements.txt` succeeds in a fresh venv.
+- [ ] `pip install -r requirements.txt` succeeds in a fresh venv.
   Add to that file: `mlx-lm`, `llama-cpp-python`, `kokoro>=0.9.4`, `scipy`.
 - [ ] Sanity script `docs/check_models.py` (small) prints which model paths
       exist on this machine and their sizes. Useful before debugging.
@@ -20,11 +20,11 @@ Demo: `python -c "from llm.backend_base import BackendBase; print('ok')"`.
 Goal: the *known good* MockingAgent demos run from inside VoiceLLM with
 the new module names. No behavior change.
 
-- [ ] `04_SOFTWARE/demos/cli_chat_mlx.py` — copy of
+- [ ] `demos/cli_chat_mlx.py` — copy of
       `MockingAgent/ollamacpp/chat_mlx.py`, points at the same MLX path.
-- [ ] `04_SOFTWARE/demos/cli_chat_llamacpp.py` — copy of
+- [ ] `demos/cli_chat_llamacpp.py` — copy of
       `MockingAgent/ollamacpp/chat_llama.py`, points at the same GGUF path.
-- [ ] `04_SOFTWARE/demos/voice_assistant_baseline.py` — copy of
+- [ ] `demos/voice_assistant_baseline.py` — copy of
       `MockingAgent/voice_assistant.py`. Untouched — this is our regression
       anchor.
 
@@ -48,9 +48,9 @@ nodes, with **MLX as the default LLM** and Gemma 4 26B-A4B-4bit.
 - [ ] `main.py` — build bus, instantiate backend by config flag,
       start orchestrator.
 
-Demo: `python 04_SOFTWARE/main.py` reproduces the MockingAgent voice
-assistant behavior, but switching `LLM_BACKEND="llamacpp"` swaps the
-backend without touching anything else.
+Demo: `python main.py` reproduces the MockingAgent voice assistant
+behavior, but switching `LLM_BACKEND="llamacpp"` swaps the backend
+without touching anything else.
 
 ## M3 — Continuous hearing
 

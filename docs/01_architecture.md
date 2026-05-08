@@ -6,14 +6,14 @@ Each concern is a node. Nodes never call each other directly — they
 publish/subscribe to a message bus. That way we can swap any one
 (LLM backend, STT strategy, TTS engine) without rewriting the others.
 
-This mirrors what `04_SOFTWARE/` already started: `core/bus.py`,
-`orchestrator/`, `llm/`, `stt/`, `tts/`, `audio/`. We are *keeping*
-that scaffold and tightening the contracts.
+All code lives at the repo root: `core/bus.py`, `orchestrator/`, `llm/`,
+`stt/`, `tts/`, `audio/`. We are *keeping* that scaffold and tightening
+the contracts.
 
 ## Module map
 
 ```
-04_SOFTWARE/
+VoiceLLM/                      # repo root
 ├── config.py                  # central tunables (sample rate, device IDs,
 │                              # backend selection, model paths, prompts)
 ├── main.py                    # build bus + nodes, start orchestrator

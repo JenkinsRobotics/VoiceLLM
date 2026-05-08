@@ -18,6 +18,11 @@ M3 additions:
   • Pending-turn queue — when an utterance arrives mid-turn, store it (one
     slot, last-write-wins) and fire it as soon as we go idle, provided it's
     not too stale. M4's barge-in path will replace this with cancellation.
+  • LLM-gated speech — every LLM reply must begin with ``<ignore>`` or
+    ``<reply>``. The orchestrator buffers the first ``LLM_GATE_BUFFER_CHARS``
+    of streaming output to decide. ``<ignore>`` = suppress TTS and skip
+    straight back to IDLE. ``<reply>`` = forward the tail to TTS as normal.
+    See ``_on_llm_token`` and ``_on_llm_done``.
 """
 
 from __future__ import annotations
@@ -50,6 +55,11 @@ class Orchestrator:
         # M3: pending-turn slot (single-slot, last-write-wins).
         self._pending_text: str | None = None
         self._pending_ts: float = 0.0
+
+        # M3: LLM-gate state, reset at the start of each turn.
+        self._gate_buffer: str = ""
+        self._gate_decided: bool = False
+        self._gate_ignore: bool = False
 
         # M3: optional eval log for offline review.
         self._eval_log_path: Path | None = (
@@ -126,6 +136,9 @@ class Orchestrator:
         self.cur.listen_start_ts = self.cur.wake_ts
         self.cur.listen_end_ts = now()
         self.cur.stt_text = text
+        self._gate_buffer = ""
+        self._gate_decided = False
+        self._gate_ignore = False
         self.state.set(SysState.THINKING)
 
         print(f"[think]  {text!r}", flush=True)
@@ -161,13 +174,74 @@ class Orchestrator:
             self.cur.llm_first_token_ts = now()
             if not self.cur.tts_start_ts:
                 self.cur.tts_start_ts = self.cur.llm_first_token_ts
+
+        # Gate phase: buffer until we see <ignore> or <reply>, or hit fallback.
+        if not self._gate_decided:
+            self._gate_buffer += delta
+            tail = self._gate_check()
+            if not self._gate_decided:
+                return
+            if self._gate_ignore:
+                return
+            # Fall through to forward the post-tag tail (if any) to TTS.
+            delta = tail
+            if not delta:
+                return
+
+        if self._gate_ignore:
+            return  # Ignored turn — discard remaining tokens.
+
         if self.state.value != SysState.RESPONDING:
             self.state.set(SysState.RESPONDING)
         self.tts.feed_text(delta)
 
+    def _gate_check(self) -> str:
+        """Inspect ``self._gate_buffer`` and decide the gate. Returns the
+        post-tag tail to forward to TTS when ``<reply>`` is found, or "" otherwise."""
+        lowered = self._gate_buffer.lower()
+        ignore_idx = lowered.find("<ignore>")
+        reply_idx = lowered.find("<reply>")
+
+        # Prefer whichever tag appears first.
+        if ignore_idx != -1 and (reply_idx == -1 or ignore_idx < reply_idx):
+            self._gate_decided = True
+            self._gate_ignore = True
+            stt_text = self.cur.stt_text if self.cur else ""
+            print(f"[ignored by LLM] {stt_text!r}", flush=True)
+            self._log_eval(stt_text, "llm_ignored")
+            return ""
+
+        if reply_idx != -1:
+            self._gate_decided = True
+            self._gate_ignore = False
+            return self._gate_buffer[reply_idx + len("<reply>"):]
+
+        if len(self._gate_buffer) >= cfg.LLM_GATE_BUFFER_CHARS:
+            # LLM forgot the tag protocol — default to reply.
+            self._gate_decided = True
+            self._gate_ignore = False
+            print(f"[gate fallback → reply] {self._gate_buffer!r}", flush=True)
+            return self._gate_buffer
+
+        return ""
+
     def _on_llm_done(self, reply: str) -> None:
         if self.cur:
             self.cur.llm_done_ts = now()
+
+        # Edge case: gate never decided because the LLM produced fewer than
+        # LLM_GATE_BUFFER_CHARS total. Treat the buffer as the reply.
+        if not self._gate_decided and self._gate_buffer:
+            self._gate_decided = True
+            self._gate_ignore = False
+            self.tts.feed_text(self._gate_buffer)
+
+        if self._gate_ignore:
+            # TTS never started; do the IDLE handoff ourselves so the next
+            # turn (or pending-turn slot) can fire.
+            self._on_tts_done()
+            return
+
         # Synthesize whatever tail is still buffered in TTS.
         self.tts.flush()
         if reply:

@@ -25,8 +25,8 @@ Then read in order:
 
 The MockingAgent reference files these plans cite live in:
 
-- [MockingAgent/voice_assistant.py](../../../MockingAgent/voice_assistant.py)
-- [MockingAgent/ollamacpp/chat_mlx.py](../../../MockingAgent/ollamacpp/chat_mlx.py)
-- [MockingAgent/ollamacpp/chat_llama.py](../../../MockingAgent/ollamacpp/chat_llama.py)
-- [MockingAgent/PywisperCpp/pywhispercpp_examples/llm_listener/](../../../MockingAgent/PywisperCpp/pywhispercpp_examples/llm_listener/)
-- [MockingAgent/PywisperCpp/pywhispercpp_examples/local_assistant/](../../../MockingAgent/PywisperCpp/pywhispercpp_examples/local_assistant/)
+- [MockingAgent/voice_assistant.py](../../MockingAgent/voice_assistant.py)
+- [MockingAgent/ollamacpp/chat_mlx.py](../../MockingAgent/ollamacpp/chat_mlx.py)
+- [MockingAgent/ollamacpp/chat_llama.py](../../MockingAgent/ollamacpp/chat_llama.py)
+- [MockingAgent/PywisperCpp/pywhispercpp_examples/llm_listener/](../../MockingAgent/PywisperCpp/pywhispercpp_examples/llm_listener/)
+- [MockingAgent/PywisperCpp/pywhispercpp_examples/local_assistant/](../../MockingAgent/PywisperCpp/pywhispercpp_examples/local_assistant/)

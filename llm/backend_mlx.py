@@ -31,12 +31,6 @@ class MLXBackend(BackendBase):
         self.model, self.tokenizer = load(model_id)
         print(f"[mlx-lm] Loaded in {time.perf_counter() - t0:.1f}s.", flush=True)
 
-        # Gemma 4's tokenizer separates <eos> from <end_of_turn>; mlx-lm
-        # only stops on eos_token_id by default, so add the EOT too.
-        eot = getattr(self.tokenizer, "eot_token", None)
-        if eot and eot != self.tokenizer.eos_token:
-            self.tokenizer.add_eos_token(eot)
-
     def warm(self) -> None:
         from mlx_lm import generate
 
@@ -76,9 +70,37 @@ class MLXBackend(BackendBase):
         if sampler is not None:
             kwargs["sampler"] = sampler
 
+        # Gemma's chat template ends each assistant turn with <end_of_turn>.
+        # mlx-lm only stops on the tokenizer's eos_token_id by default, which
+        # is <eos> (session end), not <end_of_turn>. Without this check the
+        # model runs to max_tokens and starts looping. The TokenizerWrapper
+        # API for adding additional EOS varies by version, so we just watch
+        # the streamed text and stop when we see the marker.
+        STOP_MARKERS = ("<end_of_turn>", "<|im_end|>", "<eos>")
+        buffered = ""
         for resp in stream_generate(self.model, self.tokenizer, prompt=prompt, **kwargs):
             if self.stop_event.is_set():
                 break
             text = resp.text
-            if text:
-                yield text
+            if not text:
+                continue
+
+            # Detect stop markers that may straddle a token boundary by
+            # buffering the last few chars across yields.
+            buffered = (buffered + text)[-32:]
+            stop_at = -1
+            for marker in STOP_MARKERS:
+                idx = buffered.find(marker)
+                if idx != -1:
+                    # Compute where the marker starts within the *current* delta.
+                    overlap = len(buffered) - len(text)
+                    stop_at = max(0, idx - overlap)
+                    break
+
+            if stop_at >= 0:
+                head = text[:stop_at]
+                if head:
+                    yield head
+                break
+
+            yield text

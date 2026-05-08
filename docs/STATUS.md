@@ -4,17 +4,20 @@
 [06_milestones.md](06_milestones.md) for the milestone definitions and
 [01_architecture.md](01_architecture.md) for the module/bus layout.
 
-Last updated: **2026-05-07**. M2 complete; M3 quick path code-complete (runtime
-verification pending).
+Last updated: **2026-05-07**. Repo flattened (code now lives at root, no
+more `04_SOFTWARE/`). M2 complete; M3 quick path shipped; M3.5 continuous
+STT in tree, opt-in via `STT_MODE = "continuous"`.
 
 ---
 
 ## TL;DR
 
-Modular, bus-driven local voice assistant on Apple Silicon. Final code lives
-in [04_SOFTWARE/](../). Demo/reference code that informed the design lives in
-the sibling [MockingAgent/](../../../MockingAgent/) repo (notably
-[voice_assistant.py](../../../MockingAgent/voice_assistant.py) — the
+Modular, bus-driven local voice assistant on Apple Silicon. All code lives
+at the repo root (this `docs/` folder is a sibling of `config.py`,
+`main.py`, `core/`, `stt/`, `llm/`, `tts/`, `audio/`, `orchestrator/`).
+Demo/reference code that informed the design lives in the sibling
+[MockingAgent/](../../MockingAgent/) repo (notably
+[voice_assistant.py](../../MockingAgent/voice_assistant.py) — the
 proven Google-Home-style baseline we ported from).
 
 **Stack:** sounddevice + WebRTC VAD → pywhispercpp (whisper.cpp) → swappable
@@ -33,15 +36,16 @@ called for in step 5 has not yet been run on hardware.
 
 ---
 
-## What works right now (M2 complete)
+## What works right now (M2 + M3 quick path)
 
 ```
-cd VoiceLLM/04_SOFTWARE
+cd VoiceLLM
 python main.py
-# Say: "okay jaeger, what time is it?"
+# REQUIRE_WAKE_WORD=False is the default — just talk.
+# Flip back to True in config.py for the wake-word "okay jaeger" flow.
 ```
 
-This reproduces [MockingAgent/voice_assistant.py](../../../MockingAgent/voice_assistant.py)'s
+This reproduces [MockingAgent/voice_assistant.py](../../MockingAgent/voice_assistant.py)'s
 behavior, but every concern is now its own node communicating over the bus.
 
 ### Modules in place
@@ -98,15 +102,14 @@ GITHUB/
 │   ├── PywisperCpp/                    # all the always-listening STT demos
 │   └── legacy_voicellm_drafts/         # old loose demos that used to live in VoiceLLM/
 │
-└── VoiceLLM/                           # final clean code lives here
-    ├── 00_REFERENCES/                  # research notes, organized by topic
-    ├── 04_SOFTWARE/                    # ← THE CODE
-    │   ├── config.py
-    │   ├── main.py
-    │   ├── audio/  core/  llm/  stt/  tts/  orchestrator/
-    │   ├── docs/                       # ← these planning docs
-    │   ├── requirements.txt
-    │   └── metrics.csv                 # auto-written by MetricsLog
+└── VoiceLLM/                           # ← THE CODE (flat at the repo root)
+    ├── config.py
+    ├── main.py
+    ├── audio/  core/  llm/  stt/  tts/  orchestrator/
+    ├── docs/                           # ← these planning docs
+    ├── outputs/                        # m3_eval.jsonl etc.
+    ├── requirements.txt
+    ├── metrics.csv                     # auto-written by MetricsLog
     ├── models/                         # local model files (mostly symlinks)
     ├── LICENSE
     └── README.md
@@ -161,13 +164,24 @@ We split this into a **quick path** (lean on the existing two-pass STT) and
 Only do this once the quick path is verified and we hit a quality wall the
 filter+queue can't paper over (e.g. trailing-word loss on long sentences).
 
-1. **Port** [always_listening_hybrid_phrase_word_pipeline.py](../../../MockingAgent/PywisperCpp/pywhispercpp_examples/llm_listener/always_listening_hybrid_phrase_word_pipeline.py)
-   to `stt/stt_continuous.py`. Same node interface as `STTTwoPassNode`
-   (publishes `stt.text`, has `start`/`stop`/`set_paused`/`open_followup`).
-2. **`make_stt()` in `main.py`** — add the `STT_MODE == "continuous"`
-   branch (the dispatch hook already exists).
-3. Re-run the YouTube verification; compare false-positive rate vs. the
-   quick path before declaring it the new default.
+1. ✅ **Port** [always_listening_hybrid_phrase_word_pipeline.py](../../MockingAgent/PywisperCpp/pywhispercpp_examples/llm_listener/always_listening_hybrid_phrase_word_pipeline.py)
+   to [stt/stt_continuous.py](../stt/stt_continuous.py). Same node
+   interface as `STTTwoPassNode` (publishes `stt.text`, has
+   `start`/`stop`/`set_paused`/`open_followup`). Energy-based phrase
+   segmentation; rolling re-transcription every
+   `cfg.STT_TRANSCRIBE_EVERY_S`; phrase commits on
+   `cfg.STT_PHRASE_TIMEOUT_S` of quiet. Single Whisper model
+   (`cfg.STT_CONTINUOUS_MODEL`, default `base.en`).
+2. ✅ **`make_stt()` in [main.py](../main.py)** — `STT_MODE == "continuous"`
+   branch wired with the M3.5 tunables.
+3. **Verification still owed** — flip `STT_MODE = "continuous"` in
+   [config.py](../config.py), run `python main.py`, and compare:
+   - First-token latency vs. two_pass (rolling re-transcription should
+     cut the wait at phrase end).
+   - False-positive rate on background dialogue (rerun the YouTube test
+     against `outputs/m3_eval.jsonl`). M3.5 uses base.en by default; if
+     accuracy lags, raise `STT_CONTINUOUS_MODEL` to `small.en` or
+     `medium.en`.
 
 ### M4 — Barge-in
 
@@ -232,11 +246,12 @@ Talk over the assistant; it cuts off and listens.
 ## Sanity-check commands
 
 ```bash
-# Compile-check all M2 modules:
-cd VoiceLLM/04_SOFTWARE
+# Compile-check all M2 + M3.5 modules:
+cd VoiceLLM
 python -m py_compile config.py main.py \
   llm/backend_base.py llm/backend_mlx.py llm/backend_llamacpp.py llm/llm_node.py \
-  tts/kokoro_node.py audio/mic_stream.py stt/stt_two_pass.py \
+  tts/kokoro_node.py audio/mic_stream.py \
+  stt/stt_two_pass.py stt/stt_continuous.py \
   orchestrator/orchestrator.py core/bus.py core/state.py core/metrics.py
 
 # Confirm models exist:
@@ -252,7 +267,7 @@ python main.py
 
 1. Read this file.
 2. Read [00_overview.md](00_overview.md) and [01_architecture.md](01_architecture.md).
-3. Read [voice_assistant.py](../../../MockingAgent/voice_assistant.py) — that
+3. Read [voice_assistant.py](../../MockingAgent/voice_assistant.py) — that
    is the canonical reference for *every* STT/TTS/LLM glue decision in M2.
 4. Read [02_stt_pipelines.md](02_stt_pipelines.md) before touching M3.
 5. Don't refactor the legacy files (`stt/stt_node.py`,
