@@ -27,15 +27,20 @@ The reference files:
 
 ## Default for VoiceLLM v1
 
-Start with **hybrid phrase/word** as the primary `stt_continuous.py` because:
-- it preserves trailing words (the bug that bit `voice_assistant.py`),
-- karaoke commits are friendly to a streaming LLM (we can fire `llm.request`
-  on phrase close, then update if revised before the LLM reads it),
-- it's the strategy already validated as "best of both" in the demo notes.
+**Shipped status:**
+- ✅ `stt/stt_two_pass.py` — VAD two-pass, default for `STT_MODE = "two_pass"`.
+- ✅ `stt/stt_continuous.py` — hybrid phrase/word, opt-in via `STT_MODE = "continuous"` (M3.5).
 
-Keep the **VAD two-pass** strategy from `voice_assistant.py` available as
-`stt_two_pass.py` — it's still the right answer when we want a wake word.
-A `config.STT_MODE` flag picks which gets instantiated.
+The default stays `"two_pass"` because it's the proven baseline and the
+M3 quick path runs cleanly on top of it (orchestrator self-speech filter +
+LLM gate handle the noise rejection that the wake word used to do). Flip
+to `"continuous"` when you want lower-latency phrase commit on short
+utterances; revert via the same single line if anything regresses.
+
+Other strategies (phrase buffer, word cursor, human-style overlapping
+memory) remain unported. They can each become a `stt/*.py` node with the
+same interface (`start`/`stop`/`set_paused`/`open_followup`,
+publishes `stt.text`) if a future need surfaces.
 
 ## Open trial: ggml-large-v3-turbo for accurate pass
 
@@ -61,12 +66,15 @@ voice cold, sentence-boundary delay in TTS.
 
 ## Open questions for STT
 
-- Do we publish `stt.partial` (live live transcript) at all, or only commit
+- Do we publish `stt.partial` (live transcript) at all, or only commit
   events? Partial events are great for a UI but pointless for the LLM path.
-- How do we suppress committing the assistant's own audio? Mic-pause during
-  TTS handles 90% of it; AEC handles overlap; do we also need a soft
-  similarity filter against the most recent reply?
-- Wake-word "engaged mode" toggle: should we have a soft hotword that only
-  switches us *into* a window where any utterance is a turn (Alexa-style)?
-  Or do we just trust VAD + barge-in and commit every confident phrase?
-  Likely controlled by `config.REQUIRE_WAKE_WORD`.
+  Currently no; revisit if/when a GUI ships.
+- ~~How do we suppress committing the assistant's own audio?~~
+  **Resolved:** mic-pause during TTS (Layer A) + similarity filter
+  (Layer C) + LLM gate (Layer D). See
+  [05_barge_in_and_self_speech.md](05_barge_in_and_self_speech.md).
+- ~~Wake-word "engaged mode" toggle?~~ **Resolved:**
+  `REQUIRE_WAKE_WORD = False` is the M3 default; flip to `True` to
+  restore the Google-Home-style flow. The LLM gate replaces the
+  "engaged mode" idea — the LLM itself decides whether each phrase is
+  directed at it.

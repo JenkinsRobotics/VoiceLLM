@@ -135,6 +135,10 @@ MAX_SPEECH_MS = 12000
 INPUT_DEVICE = None   # None = system default; index or name string also OK
 OUTPUT_DEVICE = None
 
+# Keep mic capture bounded if STT falls behind during a transcription pass.
+# At 30 ms frames, 200 frames is about 6 seconds of buffered audio.
+MIC_QUEUE_MAX_FRAMES = 200
+
 # ── TTS (Kokoro) ───────────────────────────────────────────────────────
 KOKORO_VOICE = "af_heart"
 KOKORO_LANG = "a"

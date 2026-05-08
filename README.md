@@ -1,218 +1,140 @@
-## Jenkins Robotics
-# Project Template
+# VoiceLLM
 
-<!-- This is commented out. -->
+A continuously-listening, low-latency local voice assistant for Apple
+Silicon. Speak naturally; the assistant streams a spoken reply back; the
+conversation keeps going without a wake word. Think ChatGPT Voice, fully
+offline.
 
-## Project Information
+> Status: **active development**. M2 (modular voice loop) and M3 (continuous
+> hearing) ship working. M4 (barge-in) is next. See
+> [docs/STATUS.md](docs/STATUS.md) for the live handoff.
 
-Project Status : <mark style="background-color: green"> &nbsp; COMPLETED &nbsp;</mark>  
-Code Status : <mark style="background-color: green"> &nbsp; GOOD &nbsp;</mark>  
-Development Status : <mark style="background-color: red"> &nbsp; NOT ACTIVE &nbsp;</mark>  
+## What it does today
 
+- **Continuous hearing.** No wake word in the default mode — every directed
+  utterance becomes a turn.
+- **LLM-gated speech.** Every reply begins with `<ignore>` or `<reply>`;
+  the orchestrator suppresses TTS when the LLM judges the input as not
+  addressed to it (background TV, keystroke noise, transcription artifacts,
+  ambient conversation). The audio pipeline does not gatekeep — the LLM
+  does.
+- **Two interchangeable LLM backends.** Same model behavior (Gemma 4
+  26B-A4B 4-bit), one config flag — `llama.cpp` (default, robust chat
+  template handling) and `mlx-lm` (Apple MLX, faster on M-series). Swap
+  with one line in [config.py](config.py).
+- **Two interchangeable STT pipelines.** `two_pass` (proven Google-Home-style
+  fast→accurate Whisper cascade) and `continuous` (rolling re-transcription
+  hybrid). `STT_MODE` flag selects.
+- **Self-speech rejection.** Mic-pause during TTS plus a similarity filter
+  against the most recent reply. M4 will add AEC for true barge-in.
+- **Streaming TTS** via [Kokoro](https://github.com/hexgrad/kokoro). Audio
+  starts at the first sentence boundary, not after the full reply.
 
+## Stack
 
-&nbsp;
-## General Information
+| Layer | Choice |
+|---|---|
+| Audio I/O | `sounddevice` (CoreAudio) |
+| VAD | `webrtcvad` |
+| STT | `pywhispercpp` (whisper.cpp), `base.en` + `medium.en` |
+| LLM | `llama-cpp-python` (default) or `mlx-lm`, both running Gemma 4 26B-A4B 4-bit |
+| TTS | `kokoro` (`KPipeline`) |
 
+State and routing run through a single in-process pub/sub `Bus` consumed by
+the orchestrator state machine
+(`IDLE → THINKING → RESPONDING → IDLE`).
 
- This is a template README file designed to be adapted for your specific project. Replace this text with a brief overview of your project's purpose and goals.
-For example, you might describe the problem your project solves, its primary features, or its target audience. 
-- [x] Automated Tool Change
-- [x] Manual Tool Change
-- [x] Coolent 
-- [x] Tool Z Probe Macro
-- [x] Work Piece XYZ Probe
-- [x] Spindle Control
-- [x] Modularity
+## Quick start
 
-&nbsp;
-## WATCH NOW ON YOUTUBE
+Apple Silicon Mac (M1/M2/M3/M4), 24 GB+ unified memory recommended for the
+26B 4-bit model.
 
-
- Watch the project playlist on youtube. 
-
- &nbsp;
-
-[![image alt text](http://img.youtube.com/vi/w-qWbZ5-IQw/0.jpg)](https://youtube.com/playlist?list=PLNTKXZ4hgP_jekZOWw05JcJtyseCdSsIV "YouTube")
-
-&nbsp;
-## Support
-
-Did this project help you? Consider supporting! 
-
-Consider Subscribing: https://bit.ly/2DgZyuq <br>
-Patreon ➔ https://www.patreon.com/JenkinsRobotics <br>
-Venmo ➔ https://venmo.com/u/JenkinsRobotics <br>
-
-
-
-&nbsp;
-## Table of Contents
-
-
-**[Project File Structure](#project-file-structure)**<br>
-**[Installation Instructions](#installation-instructions)**<br>
-**[Next Steps](#next-steps)**<br>
-**[Components](#components)**<br>
-**[Notes and Miscellaneous](#notes-and-miscellaneous)**<br>
-**[Links](#links)**<br>
-
-
-&nbsp;
-## Project File Structure
-
-The following is a breakdown of the different folders and the files contained in them:
-
-1. **FUSION 360 POST PROCESSOR**
-    - *JenkinsCNCReprap.cps*
-    A post processor is the link between the CAM system and your CNC machine. The Post Processor translated the CAM instruction including information like the toolpath data, the type of operation, and the desired spindle feeds/speeds into the language that a CNC machine understands (gcode). Despite the fact that the DUET 3 runs RepRap Firmware, the standard RepRap post processor do not work for CNC machining. Our Custom post processor is based on the default RepRap post processor but fixes the gcode syntax errors and adds many additional modular features. 
-    **Directions:**
-      - Uploading file to Fusion 360 Cloud Storage [Personal-cloud]
-        With-in Fusion 360 open the project navigation panel. Under Libraries select "Assets", then select folder "CAMPosts" (if no folder exist then create one.) Upload the custom Post Processor within this folder for cloud storage. 
-      - Create NC Program
-        After creating your CAD model select the "Manufacturing Tab" in Fusion 360. Complete the "Setup" process and the desired toolpaths. Create a new "NC Program".  Under "Post Configuration / Library" specify the location of the Post Processor File [personal-cloud recommended]. Under Post specify the desired file "Jenkins CNC RepRap". Adjust Post Properties if desired, then export gcode.  
-
-
-    
-    &nbsp;
-2. **GCODE**  
-   - *SDCARD*
-    This folder contains a copy of all they files located on our Duet 3 Motherboard SD Card. The system drive contains multiple subfolders each containing different gcode / system files. Before Copying/referencing our  custom files it is best to upgrade the stock firmware and system files. The official Duet 3 releases can be found on GitHub.  [RepRap Files](https://github.com/Duet3D "Duet3D").
-      
-   - *Macros*
-    The Macro folder contains all the additional system files needed for the Duet 3. Files are grouped by their function. 
-     **Directions:**
-        - Upload any of the desired files. Then review the files and make any necessary  adjustment to the position points and the probe/sensors numbers.  
-
-   - *Sys*
-    The System folder contains all the important system files needed for the Duet 3. Each file serves as important gcode files that configures the machine and provide necessary gcode for specific processes like tool changes. 
-        **Directions:**
-        - For AutoTool Change Upload the following files:  TFree, Tpost, Tpre, ToolZProbe        
-        - For manual tool Change Upload the following files:  manualtoolchange, ToolZProbe,
-
-
-
-    &nbsp;
-3. **GH Pages**
-    - Files used for Github Pages and readme text file. 
-
-
-  
-
-    &nbsp;
-4. **MANUALS**
-   - *Post Processor Training Guide*
-     - The reference file for fusion 360 post proccessor. Contains reference material for different hadware apart of the CNC. 
-    
-  
-      
-
-
-> Note: Updating the RepRap firmware should be done carefully. Uploading the updated ZIP file could erase custom gcode files. 
-
-
-&nbsp;
-## Installation Instructions
-
-Installation instructions can be found in the youtube video linked below 
- 
-
- ### Video link  be updated soon
-
-[![image alt text](http://img.youtube.com/vi/w-qWbZ5-IQw/0.jpg)](https://youtube.com/playlist?list=PLNTKXZ4hgP_jekZOWw05JcJtyseCdSsIV "YouTube")
-
-
-<!-- This is commented out.  
-
-The following is a breakdown of the different folders and the files contained in them:
-
-
-```
-cd utils
-node build.js
+```bash
+git clone https://github.com/<your-fork>/VoiceLLM.git
+cd VoiceLLM
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-
-Create a file with a `.zip` extension containing these files and directories:
-
-```
-manifest.json
-common/
-chrome/
-```
-
-
-Create a file with a `.xpi` extension containing these files and directories:
+Place the Gemma 4 26B-A4B model files (or symlink them) at the locations
+in [config.py](config.py):
 
 ```
-chrome.manifest
-install.rdf
-common/
-firefox/
+~/.lmstudio/models/lmstudio-community/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-Q4_K_M.gguf
+~/.lmstudio/models/mlx-community/gemma-4-26b-a4b-4bit/
 ```
 
- This is commented out. -->
+Then run:
 
+```bash
+python main.py
+```
 
-&nbsp;
-## Next Steps
+The first run loads ~5 GB into unified memory (LLM, both Whisper sizes,
+Kokoro). Once you see `[ready] VoiceLLM running. Ctrl-C to quit.` start
+talking — no wake word needed.
 
-This project is now completed. No next steps are planned. We can release bug fixes if found. 
+## Configuration
 
-If you require assistant join our discord channel linked down below.
+All tunables live in [config.py](config.py). The flags you'll touch most:
 
+| Flag | Default | What it does |
+|---|---|---|
+| `LLM_BACKEND` | `"llamacpp"` | `"llamacpp"` (proven) or `"mlx"` (faster on M-series) |
+| `STT_MODE` | `"two_pass"` | `"two_pass"` (default) or `"continuous"` (M3.5 rolling) |
+| `REQUIRE_WAKE_WORD` | `False` | `True` reverts to "okay jaeger" gating |
+| `LLM_TEMPERATURE` | `0.6` | LLM sampling temperature |
+| `MAX_HISTORY_TURNS` | `8` | rolling user/assistant pair cap |
+| `KOKORO_VOICE` | `"af_heart"` | Kokoro voice id |
 
+See [config.py](config.py) for the full list (VAD aggressiveness, phrase
+timeouts, energy thresholds, etc.).
 
-&nbsp;
-## Components 
+## Project layout
 
-The following is a breakdown of key components for this project:
-&nbsp;
-| Item          | Function      | Cost  |
-| ------------- |:-------------:| -----:|
-| Fusion 360    | CAD           | Free |
-| VS Code       | Text Editor   |   Free |
+```
+VoiceLLM/
+├── config.py                  # all tunables
+├── main.py                    # build bus + nodes, start orchestrator
+├── core/                      # bus, state machine, metrics
+├── audio/                     # MicStream, VAD, AEC (M4)
+├── stt/                       # stt_two_pass.py, stt_continuous.py
+├── llm/                       # backend_base + backend_mlx + backend_llamacpp + llm_node
+├── tts/                       # kokoro_node.py
+├── orchestrator/              # bus consumer, state machine, LLM gate
+├── docs/                      # architecture / milestones / status
+├── outputs/                   # m3_eval.jsonl (runtime decision log)
+└── metrics.csv                # per-turn timing log
+```
 
+## Documentation
 
-&nbsp;
-## Notes and Miscellaneous
+- [docs/STATUS.md](docs/STATUS.md) — current state and what's next.
+- [docs/00_overview.md](docs/00_overview.md) — design intent.
+- [docs/01_architecture.md](docs/01_architecture.md) — module/bus layout.
+- [docs/02_stt_pipelines.md](docs/02_stt_pipelines.md) — STT strategies.
+- [docs/03_llm_backends.md](docs/03_llm_backends.md) — backend selection.
+- [docs/04_tts_kokoro.md](docs/04_tts_kokoro.md) — Kokoro coordination.
+- [docs/05_barge_in_and_self_speech.md](docs/05_barge_in_and_self_speech.md) — barge-in + self-speech.
+- [docs/06_milestones.md](docs/06_milestones.md) — build order M0–M5.
+- [docs/07_open_questions.md](docs/07_open_questions.md) — design questions.
 
+## Acknowledgments
 
-Disclaimer :
-Modifying your Shapeoko  will void the warranty. Do at your own risk.
+- [Gemma 4](https://ai.google.dev/gemma) — Google's open-weight model family
+  (26B-A4B 4-bit at the heart of this).
+- [Kokoro](https://github.com/hexgrad/kokoro) — natural TTS that runs in
+  real-time on M-series.
+- [whisper.cpp](https://github.com/ggerganov/whisper.cpp) via
+  [pywhispercpp](https://github.com/absadiki/pywhispercpp) — fastest local
+  Whisper on Apple Silicon.
+- [mlx-lm](https://github.com/ml-explore/mlx-lm) — Apple MLX inference for
+  Gemma.
+- [llama.cpp](https://github.com/ggerganov/llama.cpp) /
+  [llama-cpp-python](https://github.com/abetlen/llama-cpp-python) — the
+  cross-platform fallback backend.
 
-**ENJOY!!**
+## License
 
-That’s  all Folks. Hope this can help you in some way.
-... Consider Supporting Us Down Below. 
-
-&nbsp;
-## Links
-
-
-SUPPORT US ► 
-
-Consider Subscribing: https://www.youtube.com/@Jenkins_Robotics<br>
-Patreon ➔ https://www.patreon.com/JenkinsRobotics  <br>
-Venmo ➔ https://venmo.com/u/JenkinsRobotics <br>
-
-
-FOLLOW US ►
-
-Discord ➔ https://discord.gg/sAnE5pRVyT <br>
-Patreon ➔ https://www.patreon.com/JenkinsRobotics <br>
-Twitter ➔ https://twitter.com/j <br>
-Instagram  ➔ https://www.instagram.com/jenkinsrobotics/ <br>
-Facebook ➔ https://www.facebook.com/jenkinsrobotics/  <br>
-GitHub  ➔ https://jenkinsrobotics.github.io <br>
-
-
-
-
-
-
-
-
-
-
-
+See [LICENSE](LICENSE).

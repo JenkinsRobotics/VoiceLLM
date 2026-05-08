@@ -14,16 +14,25 @@ MockingAgent is the proven Google-Home-style baseline:
 - mic paused while TTS speaks (self-speech rejection).
 
 VoiceLLM keeps the proven plumbing but changes the *behavior model*:
-- **continuous hearing**: STT runs all the time, transcribing a rolling buffer,
-- **no wake word in the default mode**: any speech directed at the assistant
-  is a turn (we'll start with a soft hotword and an "engaged" mode toggle so
-  it isn't constantly replying to background noise),
-- **first-token streaming**: TTS starts speaking the moment the LLM emits its
-  first sentence boundary, not after the LLM finishes,
-- **barge-in**: if the user starts talking while the assistant is replying,
-  TTS halts immediately and the new speech becomes the next turn,
-- **swappable LLM backends**: llama.cpp (GGUF) *and* mlx-lm (Apple MLX) behind
-  one interface, picked from config.
+- **continuous hearing**: every committed phrase becomes a turn — no
+  "okay jaeger" between turns. (M3 — shipped.)
+- **LLM-gated speech**: every reply begins with `<ignore>` or `<reply>`;
+  the orchestrator suppresses TTS when the LLM judges the input wasn't
+  addressed to it (TV, keystrokes, hallucinated transcriptions, ambient
+  conversation). The audio pipeline stays dumb; the LLM decides. See
+  [01_architecture.md](01_architecture.md#llm-gate) and
+  [05_barge_in_and_self_speech.md](05_barge_in_and_self_speech.md).
+- **first-token streaming**: TTS starts speaking at the first sentence
+  boundary after the gate decides `<reply>`. ~50-150 ms gate buffer
+  cost on the reply path; zero audible cost on the ignore path.
+- **swappable LLM backends**: `llama-cpp-python` (default — robust chat
+  template handling and `<end_of_turn>` stop) and `mlx-lm` (Apple MLX —
+  faster on M-series, with our hand-rolled stop-marker detector to handle
+  Gemma's EOT). Same model on both: Gemma 4 26B-A4B 4-bit. One config flag.
+- **swappable STT pipelines**: `two_pass` (proven Google-Home-style cascade)
+  and `continuous` (rolling re-transcription hybrid, M3.5). One config flag.
+- **barge-in (M4, planned)**: AEC + VAD-on-cleaned-audio so the user can
+  cut the assistant off mid-reply.
 
 ## Hardware target
 
@@ -38,8 +47,8 @@ VoiceLLM keeps the proven plumbing but changes the *behavior model*:
 | Audio I/O | `sounddevice` | already used in MockingAgent, low-latency callback API |
 | VAD | `webrtcvad` | proven, cheap, 30 ms frames |
 | STT | `pywhispercpp` (whisper.cpp) | fastest local Whisper, GGML quantized |
-| LLM (default) | `mlx-lm` + `mlx-community/gemma-4-26b-a4b-4bit` | fastest decode on Apple Silicon |
-| LLM (alt) | `llama-cpp-python` + `gemma-4-26B-A4B-it-Q4_K_M.gguf` | portable, same model family |
+| LLM (default) | `llama-cpp-python` + `gemma-4-26B-A4B-it-Q4_K_M.gguf` | mature chat-template + stop-token handling; proven path |
+| LLM (alt) | `mlx-lm` + `mlx-community/gemma-4-26b-a4b-4bit` | fastest decode on Apple Silicon; needs hand-rolled EOT stop |
 | TTS | `kokoro` (`KPipeline`) | natural voice, real-time on M-series |
 | Echo control | mic-pause during TTS + (optional) AEC | self-speech rejection |
 

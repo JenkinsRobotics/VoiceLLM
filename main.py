@@ -96,6 +96,7 @@ def main() -> int:
         sr=cfg.TTS_SAMPLE_RATE,
         min_chars=cfg.TTS_MIN_CHARS,
         tail_sleep_s=cfg.TTS_TAIL_SLEEP_S,
+        output_device=cfg.OUTPUT_DEVICE,
     )
 
     # STT last — once it starts, the mic is open.

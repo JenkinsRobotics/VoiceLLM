@@ -35,3 +35,8 @@ models/
 build/
 dist/
 *.egg-info/
+
+# Runtime byproducts (per-turn timing, M3 decision log) — append-only,
+# regenerated every run. Don't track to keep diffs clean.
+metrics.csv
+outputs/

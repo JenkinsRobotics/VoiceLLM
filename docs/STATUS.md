@@ -4,9 +4,9 @@
 [06_milestones.md](06_milestones.md) for the milestone definitions and
 [01_architecture.md](01_architecture.md) for the module/bus layout.
 
-Last updated: **2026-05-07**. Repo flattened (code now lives at root, no
-more `04_SOFTWARE/`). M2 complete; M3 quick path shipped; M3.5 continuous
-STT in tree, opt-in via `STT_MODE = "continuous"`.
+Last updated: **2026-05-07**. M2 complete; M3 quick path shipped; M3.5
+continuous STT in tree (opt-in via `STT_MODE`); LLM-gated speech protocol
+shipped; both Whisper sizes eager-loaded with real warm-up.
 
 ---
 
@@ -21,18 +21,32 @@ Demo/reference code that informed the design lives in the sibling
 proven Google-Home-style baseline we ported from).
 
 **Stack:** sounddevice + WebRTC VAD → pywhispercpp (whisper.cpp) → swappable
-LLM (mlx-lm *or* llama-cpp-python, both running **Gemma 4 26B-A4B 4-bit**) →
-Kokoro TTS. State + routing through a Pub/Sub `Bus`.
+LLM (`llama-cpp-python` default *or* `mlx-lm`, both running **Gemma 4
+26B-A4B 4-bit**) → Kokoro TTS. State + routing through a Pub/Sub `Bus`.
 
-**M2 status: complete.** A wake-word voice assistant runs end-to-end with the
-new modular layout, and the LLM backend swaps between MLX and llama.cpp via
-one config flag.
+**M2 status: complete.** Modular voice loop runs end-to-end. Both LLM
+backends supported; `LLM_BACKEND = "llamacpp"` is the default since
+llama-cpp-python handles Gemma's `<end_of_turn>` natively. The MLX backend
+now stops correctly via an in-stream marker detector
+([backend_mlx.py](../llm/backend_mlx.py)) — the old `eot_token` getattr was
+a no-op and let Gemma run to `max_tokens` and loop.
 
-**M3 status (quick path): code-complete.** `REQUIRE_WAKE_WORD = False` is now
-the default, the orchestrator runs a self-speech similarity filter and a
-single-slot pending-turn queue, and every STT decision is logged to
-`outputs/m3_eval.jsonl`. The 5-min YouTube background-dialogue verification
-called for in step 5 has not yet been run on hardware.
+**M3 status (quick path): shipped.** No wake word in the default mode.
+The orchestrator runs a self-speech similarity filter, a single-slot
+pending-turn queue, and the **LLM gate** — every reply must begin with
+`<ignore>` or `<reply>`; ignored replies are suppressed from TTS without
+audible cost. Every decision is logged to `outputs/m3_eval.jsonl`.
+
+**M3.5 status: in tree, opt-in.** [stt/stt_continuous.py](../stt/stt_continuous.py)
+is a drop-in replacement for `STTTwoPassNode` with rolling re-transcription
+and energy-based phrase segmentation. Activate via
+`STT_MODE = "continuous"` in [config.py](../config.py). Default stays
+`"two_pass"` so the proven baseline is unchanged.
+
+**Polish since M2:** all four model loads (fast STT, accurate STT, LLM,
+TTS) happen at startup with real warm passes — first user turn pays only
+inference time, not setup. Conversation history is capped at
+`MAX_HISTORY_TURNS = 8` user/assistant pairs to keep prompt size bounded.
 
 ---
 
@@ -52,20 +66,21 @@ behavior, but every concern is now its own node communicating over the bus.
 
 | File | Role |
 |---|---|
-| [config.py](../config.py) | All tunables. Flip `LLM_BACKEND` between `"mlx"` and `"llamacpp"`. |
+| [config.py](../config.py) | All tunables. Flip `LLM_BACKEND` between `"llamacpp"` (default) and `"mlx"`; flip `STT_MODE` between `"two_pass"` (default) and `"continuous"`. |
 | [core/bus.py](../core/bus.py) | Single-queue pub/sub (poll-based via `get(timeout)`). |
 | [core/state.py](../core/state.py) | `SysState`: `IDLE`/`THINKING`/`RESPONDING`. |
 | [core/metrics.py](../core/metrics.py) | Per-turn timing → `metrics.csv`. |
 | [audio/mic_stream.py](../audio/mic_stream.py) | `MicStream` with `paused` flag (ported from voice_assistant.py:96-125). |
 | [audio/vad.py](../audio/vad.py), [audio/aec.py](../audio/aec.py), [audio/wakeword.py](../audio/wakeword.py) | Existing — used in M4 (AEC) and the legacy `stt_node.py`; **not yet wired** into the new flow. |
-| [stt/stt_two_pass.py](../stt/stt_two_pass.py) | Full port of voice_assistant.py: VAD worker, fast→accurate Whisper cascade, wake-word + follow-up window. Publishes `stt.text`. |
-| [stt/stt_node.py](../stt/stt_node.py) | Old VAD-segmented Whisper node. **Unused now** but left in tree. |
+| [stt/stt_two_pass.py](../stt/stt_two_pass.py) | Two-pass cascade ported from voice_assistant.py: VAD worker, fast (`base.en`) + accurate (`medium.en`) eager-loaded with silence warm-up, wake-word + follow-up window. Publishes `stt.text`. |
+| [stt/stt_continuous.py](../stt/stt_continuous.py) | M3.5 hybrid pipeline. Energy-based phrase segmentation, rolling re-transcription. Drop-in interface match for `STTTwoPassNode`. |
+| [stt/stt_node.py](../stt/stt_node.py) | Old VAD-segmented Whisper node. **Unused** — slated for deletion in M5. |
 | [llm/backend_base.py](../llm/backend_base.py) | `BackendBase` ABC: `load`, `warm`, `stream_chat`, `cancel`. |
-| [llm/backend_mlx.py](../llm/backend_mlx.py) | mlx-lm impl. Registers Gemma 4 EOT token. |
-| [llm/backend_llamacpp.py](../llm/backend_llamacpp.py) | llama-cpp-python impl. |
-| [llm/llm_node.py](../llm/llm_node.py) | Owns history, streams `llm.token` deltas; publishes cleaned reply on `llm.done`. `clean_for_tts()` ported. |
+| [llm/backend_mlx.py](../llm/backend_mlx.py) | mlx-lm impl. In-stream stop-marker detector for `<end_of_turn>` / `<eos>` / `<im_end>` (replaces the old broken `eot_token` getattr). |
+| [llm/backend_llamacpp.py](../llm/backend_llamacpp.py) | llama-cpp-python impl. Default backend; chat completion handles Gemma's stop tokens natively. |
+| [llm/llm_node.py](../llm/llm_node.py) | Owns history; streams `llm.token` deltas; publishes cleaned reply on `llm.done`. Caps history at `MAX_HISTORY_TURNS = 8` pairs. `clean_for_tts()` ported. |
 | [tts/kokoro_node.py](../tts/kokoro_node.py) | Real `KPipeline`. Synth thread + play thread. Sentence-streams. Cancellable. Publishes `mic.pause`, `tts.audio_chunk`, `tts.done`. |
-| [orchestrator/orchestrator.py](../orchestrator/orchestrator.py) | Single bus consumer; state machine; spawns LLM thread per turn. |
+| [orchestrator/orchestrator.py](../orchestrator/orchestrator.py) | Single bus consumer; state machine; spawns LLM thread per turn; **LLM-gate token buffer** (`<ignore>` suppresses TTS, `<reply>` forwards the tail). |
 | [main.py](../main.py) | `make_backend()` + `make_stt()` factory funcs, then `Orchestrator(...).run()`. |
 
 ### Bus topics in use
@@ -87,7 +102,11 @@ GGUF_PATH       = LMSTUDIO_MODELS/lmstudio-community/gemma-4-26B-A4B-it-GGUF/
                   gemma-4-26B-A4B-it-Q4_K_M.gguf
 ```
 
-STT: `base.en` (fast) → `medium.en` (accurate, lazy-loaded on first wake match).
+STT: `base.en` (fast) and `medium.en` (accurate) — **both eager-loaded at
+startup** with a 1.5 s silence warm pass, so first user turn pays only
+inference cost, not setup. Old behavior lazy-loaded `medium.en` on the
+first wake match (a hangover from M2's wake-word path); pointless now that
+M3 fires the accurate model on every phrase.
 
 ---
 
@@ -127,26 +146,36 @@ a turn unless we filter it out. This is the "ChatGPT Voice" feel.
 We split this into a **quick path** (lean on the existing two-pass STT) and
 **M3.5** (build the hybrid pipeline node for lower latency / better feel).
 
-#### M3 quick path — code-complete
+#### M3 quick path — shipped
 
 1. ✅ **`REQUIRE_WAKE_WORD = False`** in [config.py](../config.py). The
    existing `STTTwoPassNode` already has the no-wake-word branch
-   ([stt_two_pass.py:294-297](../stt/stt_two_pass.py#L294-L297)) — every
-   phrase becomes a turn.
+   ([stt_two_pass.py](../stt/stt_two_pass.py)) — every phrase becomes a turn.
 2. ✅ **Self-speech similarity filter** on `stt.text` ingress in the
    orchestrator. Compares incoming text against the most recent `assistant`
    turn from `LLMNode.history_snapshot()` via `difflib.SequenceMatcher`;
-   drops if `>= cfg.SELF_SPEECH_SIMILARITY_THRESHOLD` (default 0.75). See
-   [orchestrator.py:_sounds_like_self](../orchestrator/orchestrator.py#L137-L146).
+   drops if `>= cfg.SELF_SPEECH_SIMILARITY_THRESHOLD` (default 0.75).
 3. ✅ **Pending-turn queue** replaces the old "drop while busy" placeholder.
    Single-slot, last-write-wins; fires when `_on_tts_done` returns to IDLE,
    provided the queued utterance is younger than `cfg.PENDING_TURN_MAX_AGE_S`
-   (default 3.0 s). See
-   [orchestrator.py:_on_tts_done](../orchestrator/orchestrator.py#L176-L197).
-4. ✅ **Eval logging** — every STT decision (`accepted` /
-   `dropped_self_echo` / `queued_pending` / `pending_fired` / `pending_stale`)
-   is appended to `outputs/m3_eval.jsonl` for offline review. Disable by
-   setting `cfg.M3_EVAL_LOG = None`.
+   (default 3.0 s).
+4. ✅ **LLM gate** — the user explicitly didn't want the audio pipeline
+   deciding what's directed speech. So the LLM does. Every reply must begin
+   with `<ignore>` or `<reply>` (instruction in
+   [config.py:SYSTEM_PROMPT](../config.py)). The orchestrator buffers the
+   first `LLM_GATE_BUFFER_CHARS = 30` chars of the streaming reply, decides
+   based on the tag, and either:
+   - `<ignore>` → suppresses TTS, transitions straight to IDLE, logs
+     `llm_ignored` to the eval JSONL.
+   - `<reply>` → forwards the post-tag tail to TTS as normal.
+   Falls back to "treat as reply" if the tag never appears within the
+   buffer. See `_on_llm_token` and `_gate_check` in
+   [orchestrator/orchestrator.py](../orchestrator/orchestrator.py).
+5. ✅ **Eval logging** — every STT decision (`accepted` /
+   `dropped_self_echo` / `queued_pending` / `pending_fired` /
+   `pending_stale` / `llm_ignored`) is appended to
+   `outputs/m3_eval.jsonl` for offline review. Disable by setting
+   `cfg.M3_EVAL_LOG = None`.
 
 #### M3 quick path — verification still owed
 
@@ -231,13 +260,23 @@ Talk over the assistant; it cuts off and listens.
 4. **`webrtcvad` vs `webrtcvad-wheels`**: requirements.txt asks for
    `-wheels` (prebuilt). The old root requirements named bare `webrtcvad`
    which builds from source. Consistent now.
-5. **Gemma 4 in `mlx-lm`** needs the EOT token added explicitly or it'll
-   over-generate; handled in
-   [backend_mlx.py:load()](../llm/backend_mlx.py).
-6. **First-run latency**: `KokoroNode.__init__` does a 1-line warm-up synth
-   that takes ~3-5 s. `BackendBase.warm()` does a 1-token gen, also a few
-   seconds. Both run before the mic opens.
-7. **macOS mic permission**: launching from VS Code's terminal sometimes
+5. **Gemma 4 in `mlx-lm`** doesn't stop on `<end_of_turn>` by default —
+   the tokenizer wrapper's API for additional EOS tokens varies by mlx-lm
+   version. We solved it via an in-stream stop-marker detector in
+   [backend_mlx.py:stream_chat()](../llm/backend_mlx.py) that buffers the
+   last 32 chars of streamed text and stops when it sees `<end_of_turn>`,
+   `<eos>`, or `<|im_end|>`. Without this fix, MLX runs to `max_tokens`
+   and loops.
+6. **First-run latency**: all four model loads happen at startup before
+   the mic opens — Kokoro 1-line warm synth (~3-5 s), `BackendBase.warm()`
+   1-token gen (~1-2 s), both Whisper sizes plus a 1.5 s silence transcribe
+   each (~1-2 s combined). First user turn then pays only inference time.
+7. **Whisper warm-up needs ≥1000 ms of audio**; we use 1.5 s of silence
+   in [stt_two_pass.py:_warm_stt()](../stt/stt_two_pass.py) and
+   [stt_continuous.py](../stt/stt_continuous.py). Sub-1000-ms warm
+   transcribes get rejected by Whisper with `input is too short - ... ms`
+   and silently skip inference, defeating the whole point.
+8. **macOS mic permission**: launching from VS Code's terminal sometimes
    inherits the editor's TCC grant, sometimes prompts. If `MicStream`
    silently captures zeros, that's the issue.
 

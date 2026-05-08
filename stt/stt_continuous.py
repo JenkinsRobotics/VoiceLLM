@@ -36,6 +36,7 @@ from difflib import SequenceMatcher
 
 import numpy as np
 
+import config as cfg
 from audio.mic_stream import MicStream
 
 
@@ -118,6 +119,7 @@ class STTContinuousNode:
         self.mic = MicStream(
             sample_rate=sample_rate,
             frame_samples=self._frame_samples,
+            max_queue_frames=cfg.MIC_QUEUE_MAX_FRAMES,
             device=input_device,
         )
 

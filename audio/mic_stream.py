@@ -22,11 +22,12 @@ class MicStream:
         *,
         sample_rate: int,
         frame_samples: int,
+        max_queue_frames: int | None = None,
         device=None,
     ) -> None:
         self.sample_rate = sample_rate
         self.frame_samples = frame_samples
-        self.q: queue.Queue[np.ndarray] = queue.Queue()
+        self.q: queue.Queue[np.ndarray] = queue.Queue(maxsize=max_queue_frames or 0)
         self.paused = False
         self._stream = sd.InputStream(
             device=device,
@@ -42,7 +43,17 @@ class MicStream:
             print(f"[mic] {status}", file=sys.stderr)
         if self.paused or frames != self.frame_samples:
             return
-        self.q.put(indata.copy())
+        try:
+            self.q.put_nowait(indata.copy())
+        except queue.Full:
+            try:
+                self.q.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self.q.put_nowait(indata.copy())
+            except queue.Full:
+                pass
 
     def start(self) -> None:
         self._stream.start()

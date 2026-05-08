@@ -25,6 +25,7 @@ from difflib import SequenceMatcher
 import numpy as np
 import webrtcvad
 
+import config as cfg
 from audio.mic_stream import MicStream
 
 
@@ -221,6 +222,7 @@ class STTTwoPassNode:
         self.mic = MicStream(
             sample_rate=sample_rate,
             frame_samples=frame_samples,
+            max_queue_frames=cfg.MIC_QUEUE_MAX_FRAMES,
             device=input_device,
         )
         self.phrase_q: queue.Queue[tuple[np.ndarray, str]] = queue.Queue()

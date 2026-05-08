@@ -100,6 +100,8 @@ class Orchestrator:
         elif topic == "tts.done":
             self._on_tts_done()
         elif topic == "mic.pause":
+            if bool(payload) and self.cur and not self.cur.tts_start_ts:
+                self.cur.tts_start_ts = now()
             # TTS asks the mic to mute itself while speaking.
             self.stt.set_paused(bool(payload))
         # tts.audio_chunk is published for AEC/similarity-filter subscribers
@@ -172,8 +174,8 @@ class Orchestrator:
     def _on_llm_token(self, delta: str) -> None:
         if self.cur and not self.cur.llm_first_token_ts:
             self.cur.llm_first_token_ts = now()
-            if not self.cur.tts_start_ts:
-                self.cur.tts_start_ts = self.cur.llm_first_token_ts
+        if self.cur:
+            self.cur.tokens += 1
 
         # Gate phase: buffer until we see <ignore> or <reply>, or hit fallback.
         if not self._gate_decided:
@@ -239,6 +241,7 @@ class Orchestrator:
         if self._gate_ignore:
             # TTS never started; do the IDLE handoff ourselves so the next
             # turn (or pending-turn slot) can fire.
+            self.llm.discard_last_turn()
             self._on_tts_done()
             return
 

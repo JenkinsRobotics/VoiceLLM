@@ -1,7 +1,19 @@
 import webrtcvad
 import numpy as np
 from collections import deque
-from config import SAMPLE_RATE, VAD_FRAME_MS, VAD_AGGRESSIVENESS, VAD_PRE_SPEECH_MS, VAD_POST_SPEECH_MS, VAD_MAX_SEGMENT_S
+from config import (
+    SAMPLE_RATE,
+    FRAME_MS,
+    VAD_AGGRESSIVENESS,
+    PRE_ROLL_MS,
+    SILENCE_HANGOVER_MS,
+    MAX_SPEECH_MS,
+)
+
+VAD_FRAME_MS = FRAME_MS
+VAD_PRE_SPEECH_MS = PRE_ROLL_MS
+VAD_POST_SPEECH_MS = SILENCE_HANGOVER_MS
+VAD_MAX_SEGMENT_S = MAX_SPEECH_MS / 1000
 
 class VADSegmenter:
     """

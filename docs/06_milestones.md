@@ -85,6 +85,12 @@ Goal: interrupt the assistant by talking over it.
 Demo: while the assistant is mid-reply, talk over it. It cuts off within
 ~150 ms and processes the new utterance.
 
+**AEC engine choice:** [audio/aec.py](../audio/aec.py) is sketched against
+[`pyaec`](https://pypi.org/project/pyaec/) (SpeexDSP-based, easy macOS
+wheels). Alternative is [`webrtc-audio-processing`](https://pypi.org/project/webrtc-audio-processing/)
+(WebRTC APM with AEC + NS + AGC, but harder to build). Add the chosen
+package to [requirements.txt](../requirements.txt) when wiring M4.
+
 ## M5 — Polish
 
 - [ ] Latency dashboard (`metrics.csv` already exists; add a tiny live

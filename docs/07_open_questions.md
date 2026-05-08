@@ -18,26 +18,25 @@ AEC reference) needs a real fanout.
 
 **Lean:** A for v1. We don't have backpressure pressure yet.
 
-## 2. History ownership
+## 2. History ownership ✅ RESOLVED
 
-Where does the chat history live?
-- In the LLM node (it owns the chat template) — clean, but the
-  orchestrator has to ask it for history to log to metrics.
-- In the orchestrator — easier to log/inspect, but two places have to
-  agree on chat format.
+Lives in the LLM node ([llm/llm_node.py](../llm/llm_node.py)). The
+orchestrator reads via `node.history_snapshot()` for the self-speech
+similarity filter. History is also capped at `MAX_HISTORY_TURNS = 8`
+user/assistant pairs. Closed.
 
-**Lean:** in the LLM node. Expose `node.history_snapshot()` for logging.
+## 3. Wake-word: gone, soft, or always-on? ✅ RESOLVED
 
-## 3. Wake-word: gone, soft, or always-on?
+Three modes were on the table; we ended up with two:
+- **Always-on** (`REQUIRE_WAKE_WORD = False`, default) — every committed
+  phrase reaches the LLM, which gates via `<ignore>`/`<reply>` (see
+  [01_architecture.md §LLM gate](01_architecture.md#llm-gate)).
+- **Strict wake** (`REQUIRE_WAKE_WORD = True`) — original Google-Home flow.
 
-Three modes worth supporting:
-- **Always-on**: every committed phrase → LLM (M3 default).
-- **Soft hotword**: a short phrase opens an "engaged" window where every
-  utterance counts; window expires after silence. Best of both.
-- **Strict wake**: every turn requires a wake phrase (the M1 baseline).
-
-**Lean:** ship M3 as soft-hotword once `01_architecture.md` is realized.
-Gives us the natural feel without false-firing on TV in the background.
+The "soft hotword / engaged mode" idea got replaced by the LLM gate. The
+LLM understands context (phrasing, recent history) better than any wake
+phrase heuristic, so we let it decide directly. The audio pipeline doesn't
+gatekeep, the LLM does. Closed.
 
 ## 4. Default STT model
 
@@ -47,9 +46,11 @@ Trade-off between latency and accuracy:
 - `large-v3-turbo` — closer to `medium` in speed, much closer to `large`
   in quality. Worth trialing.
 
-We need an actual head-to-head before locking. Keep MockingAgent's
-two-pass strategy available if we can't pick one — fast `base.en` to
-gate, accurate model only when we're committing.
+**Current shipped state:** two_pass mode loads both `base.en` and
+`medium.en` eagerly at startup with real warm passes; every phrase runs
+medium.en in M3 mode. Continuous mode uses `STT_CONTINUOUS_MODEL`
+(default `base.en`). Head-to-head against `large-v3-turbo` is still owed
+when accuracy matters more than speed.
 
 ## 5. Sentence-streaming chunk size
 
@@ -70,12 +71,10 @@ based on whether we ship a UI.
 
 **Lean:** publish it but no one subscribes by default. Cheap to add later.
 
-## 7. Do we need the `Lilith-AI/` repo at the same level?
+## 7. Lilith-AI sibling repo ✅ DEFERRED
 
-There's a sibling `Lilith-AI/` directory in `GITHUB/`. Unclear if it's a
-separate project, an earlier iteration, or assets we should pull from.
-Not in scope for VoiceLLM v1, but worth a quick look before assuming
-nothing in there matters for this work.
+Sibling `Lilith-AI/` directory is unrelated to VoiceLLM. Not pulling
+anything from it. Closed.
 
 ## 8. macOS sandboxing / TCC microphone
 

@@ -1,7 +1,9 @@
 import sounddevice as sd
 import numpy as np
 from collections import deque
-from config import SAMPLE_RATE, BLOCK_SAMPLES, INPUT_DEVICE, AUDIO_DEBUG
+from config import SAMPLE_RATE, FRAME_SAMPLES, INPUT_DEVICE, AUDIO_DEBUG
+
+BLOCK_SAMPLES = FRAME_SAMPLES
 
 def print_devices():
     try:

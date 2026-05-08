@@ -23,6 +23,7 @@ def clean_for_tts(text: str) -> str:
     text = re.sub(r"\*+", "", text)
     text = re.sub(r"^[\-\*\d\.\)]+\s+", "", text, flags=re.MULTILINE)
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"^\s*<(?:reply|ignore)>\s*", "", text, flags=re.IGNORECASE)
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -72,6 +73,17 @@ class LLMNode:
     def history_snapshot(self) -> list[dict]:
         with self._lock:
             return list(self.history)
+
+    def discard_last_turn(self) -> None:
+        """Remove the most recent user/assistant pair from rolling history."""
+        with self._lock:
+            if len(self.history) < 3:
+                return
+            if (
+                self.history[-2].get("role") == "user"
+                and self.history[-1].get("role") == "assistant"
+            ):
+                del self.history[-2:]
 
     def ask_stream(self, user_text: str) -> None:
         """Append user_text, stream deltas to the bus, append final reply."""

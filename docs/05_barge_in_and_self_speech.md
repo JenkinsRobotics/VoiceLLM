@@ -62,6 +62,24 @@ if SequenceMatcher(None, recent_assistant_reply, candidate_text).ratio() > 0.75:
 ```
 
 We already have `recent_assistant_reply` in the LLM history.
+**Implemented** in [orchestrator/orchestrator.py:_sounds_like_self](../orchestrator/orchestrator.py)
+with `SELF_SPEECH_SIMILARITY_THRESHOLD = 0.75`.
+
+### Layer D — LLM gate (the catch-all)
+
+If A/B/C all let something through, the LLM itself decides whether to
+respond. Every reply must begin with `<ignore>` or `<reply>` (system
+prompt instruction); the orchestrator suppresses TTS on `<ignore>`.
+
+This catches not just self-speech but also TV, ambient room talk,
+keystroke noise, and Whisper hallucinations — any input that isn't a
+directed turn. See [01_architecture.md §LLM gate](01_architecture.md#llm-gate)
+for the full design.
+
+The layers compose: audio-side filtering catches the obvious cases cheaply;
+the LLM gate catches the subtle cases that no heuristic would. The
+audio-side filtering also keeps prompt cost low — better not to feed
+fifty `[BLANK_AUDIO]`s per minute to the LLM if we don't have to.
 
 ## Problem 2 — Barge-in: stop talking when the user starts talking
 
@@ -101,8 +119,10 @@ These are heuristics from prior systems; tune them after first end-to-end test.
 
 | Mode | Self-speech | Barge-in |
 |---|---|---|
-| **Default (M2)** | Mic-pause during TTS (Layer A) | OFF — TTS finishes before mic re-opens |
-| **M3** | Mic-pause + similarity filter | OFF |
-| **M4** | AEC + similarity filter | ON, with sustained-voice + start-grace guards |
+| M2 | Mic-pause during TTS (Layer A) | OFF — TTS finishes before mic re-opens |
+| **M3 (current)** | Mic-pause + similarity filter + LLM gate | OFF; mid-reply utterances are queued (single-slot, last-write-wins) |
+| M4 (next) | AEC + similarity filter + LLM gate | ON, with sustained-voice + start-grace guards |
 
-Ship M2 first. M4 is what gets us to "ChatGPT Voice" feel.
+The LLM gate (Layer D) was added during M3 and stays on for M4. It's
+prompt-only, so no architectural cost; the orchestrator already does the
+token buffering.

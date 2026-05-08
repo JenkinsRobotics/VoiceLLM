@@ -41,6 +41,7 @@ class KokoroNode:
         sr: int = 24000,
         min_chars: int = 60,
         tail_sleep_s: float = 0.12,
+        output_device=None,
     ) -> None:
         from kokoro import KPipeline
 
@@ -56,6 +57,7 @@ class KokoroNode:
         self.sr = sr
         self.min_chars = min_chars
         self.tail_sleep_s = tail_sleep_s
+        self.output_device = output_device
 
         self.text_q: queue.Queue[_TextEvent] = queue.Queue()
         self.audio_q: queue.Queue[np.ndarray | None] = queue.Queue(maxsize=32)
@@ -152,8 +154,8 @@ class KokoroNode:
                 if speaking:
                     time.sleep(self.tail_sleep_s)
                     self.bus.publish("mic.pause", False)
-                    self.bus.publish("tts.done", None)
                     speaking = False
+                self.bus.publish("tts.done", None)
                 continue
 
             if self._cancelled.is_set():
@@ -172,7 +174,7 @@ class KokoroNode:
             # subscribers as a far-end reference.
             self.bus.publish("tts.audio_chunk", audio)
             try:
-                sd.play(audio, samplerate=self.sr)
+                sd.play(audio, samplerate=self.sr, device=self.output_device)
                 sd.wait()
             except Exception as exc:
                 print(f"[tts] playback failed: {exc}", flush=True)

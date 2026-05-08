@@ -26,10 +26,10 @@ that voice needs. We're going to extract that into a `BackendBase` ABC.
     └── tokenizer{,_config}.json                # MLX default
 ```
 
-`config.py` will reference these via constants:
+`config.py` references these via constants:
 
 ```python
-LLM_BACKEND = "mlx"   # or "llamacpp"
+LLM_BACKEND = "llamacpp"  # or "mlx" (post-fix; see "MLX EOT" below)
 GGUF_PATH   = "/Users/.../gemma-4-26B-A4B-it-Q4_K_M.gguf"
 MLX_PATH    = "/Users/.../mlx-community/gemma-4-26b-a4b-4bit"
 ```
@@ -82,37 +82,78 @@ either add a tiny dispatcher or stick with one consumer thread per node — see
 
 ## Why both backends
 
-| | MLX (mlx-lm) | llama.cpp (GGUF) |
+| | llama.cpp (GGUF, default) | MLX (mlx-lm) |
 |---|---|---|
-| First-token latency | Lower on M-series | Higher; depends on Metal kernel cache |
-| Decode tok/s | Generally higher on M-series | Slightly lower for MoE, comparable for dense |
-| Memory | Lower for 4-bit weight-only | Higher for same nominal quantization |
-| Ecosystem | macOS-only | Cross-platform; GGUF is the de-facto local format |
-| Tokenizer config | Need to handle Gemma 4 EOT separately (see chat_mlx.py:52-54) | Built into GGUF |
-| Stream API | `stream_generate(...)` yielding `.text` | `create_chat_completion(stream=True)` yielding deltas |
+| First-token latency | Slightly higher on M-series | Lower on M-series |
+| Decode tok/s | Solid; mature kernels | Generally higher on Apple Silicon |
+| Memory | Higher for same nominal quantization | Lower (unified-memory native) |
+| Ecosystem | Cross-platform; GGUF is the de-facto local format | macOS-only |
+| Tokenizer / stop tokens | Chat completion handles Gemma's `<end_of_turn>` natively. Just works. | mlx-lm's `TokenizerWrapper` API for additional stop tokens varies by version; we use an in-stream marker detector instead (see "MLX EOT" below). |
+| Stream API | `create_chat_completion(stream=True)` yielding deltas | `stream_generate(...)` yielding `.text` |
 
-For voice we want lowest TTFT → MLX is the default. We keep llama.cpp because:
-1. it's the format MockingAgent's `voice_assistant.py` already runs against,
-2. some Gemma 4 quants only ship as GGUF,
-3. it's the portability fallback if MLX changes break us.
+**llama.cpp is the default** because chat completion handles Gemma's stop
+tokens correctly out of the box. We keep MLX because:
+1. it's faster on Apple Silicon when it works,
+2. it's the path for any future MLX-only models (e.g. dense Gemma at 8-bit),
+3. the in-stream stop fix means MLX is now also safe to enable.
+
+## MLX EOT (the fix that took us a while)
+
+The original [backend_mlx.py](../llm/backend_mlx.py) load tried this:
+
+```python
+eot = getattr(self.tokenizer, "eot_token", None)
+if eot and eot != self.tokenizer.eos_token:
+    self.tokenizer.add_eos_token(eot)
+```
+
+The mlx-lm `TokenizerWrapper` has no attribute called `eot_token` —
+that's a made-up name. `getattr` returned `None`, the `if` was always
+false, and Gemma's `<end_of_turn>` never got registered as a stop. The
+model ran to `LLM_MAX_TOKENS` every turn and started looping the same
+sentence. Symptom: 4-paragraph rambling replies even on simple prompts.
+
+The fix in [backend_mlx.py:stream_chat()](../llm/backend_mlx.py) is
+backend-API-agnostic — we watch the streamed text:
+
+```python
+STOP_MARKERS = ("<end_of_turn>", "<|im_end|>", "<eos>")
+buffered = ""
+for resp in stream_generate(self.model, self.tokenizer, prompt=prompt, **kwargs):
+    text = resp.text
+    if not text:
+        continue
+    buffered = (buffered + text)[-32:]
+    # detect a marker straddling a token boundary, yield the head, break
+    ...
+```
+
+Robust to mlx-lm version changes; no tokenizer-wrapper guessing.
 
 ## Sampling defaults for voice
 
-Voice replies should be short and conversational, not essay-length:
+Voice replies should be short and conversational, not essay-length. The
+SYSTEM_PROMPT also carries the `<ignore>`/`<reply>` gate protocol — see
+[01_architecture.md](01_architecture.md#llm-gate) and
+[05_barge_in_and_self_speech.md](05_barge_in_and_self_speech.md).
 
 ```python
-SYSTEM_PROMPT = (
-    "You are a voice assistant having a real-time spoken conversation. "
-    "Reply in 1–3 short sentences of natural conversational English. "
-    "No markdown, no lists, no code blocks, no emoji. If unsure, say so briefly."
-)
 LLM_MAX_TOKENS  = 220        # ~30 seconds of speech is plenty
 LLM_TEMPERATURE = 0.6        # MockingAgent uses 0.7; lower for tighter answers
 LLM_TOP_P       = 0.9
+MAX_HISTORY_TURNS = 8        # cap rolling user/assistant pairs
 ```
 
 `clean_for_tts()` from `voice_assistant.py:265-271` (strips markdown/code
-fences/list bullets) ports over verbatim.
+fences/list bullets) ports over verbatim into [llm/llm_node.py](../llm/llm_node.py).
+
+## History trimming
+
+[LLMNode](../llm/llm_node.py) caps conversation history at
+`cfg.MAX_HISTORY_TURNS` user/assistant pairs (system prompt always
+preserved). Without this, a long session grows the prompt monotonically
+and per-turn latency drifts up. Ported from
+[voice_assistant.py:258-263](../../MockingAgent/voice_assistant.py#L258-L263).
 
 ## Cancellation (for barge-in)
 
@@ -133,9 +174,12 @@ for delta in backend.stream_chat(...):
 
 ## Open questions for LLM
 
-- Do we keep the conversation history in the LLM node or in the orchestrator?
-  (Lean: in LLM node — only it knows the chat template format.)
-- History length cap? Voice goes long. Cap at the last N user/assistant pairs
-  plus a "summary so far" injection? Defer until we see real usage.
+- ~~Where does conversation history live?~~ **Resolved:** in the LLM node.
+  Exposed via `node.history_snapshot()` for self-speech filter + metrics.
+- ~~History length cap?~~ **Resolved:** `MAX_HISTORY_TURNS = 8` user/assistant
+  pairs (see above).
 - Function/tool calling? Out of scope for v1; revisit if we want timers,
   weather, music, etc.
+- Repetition penalty for MLX? mlx-lm's `make_sampler` accepts
+  `repetition_penalty` in newer versions. Worth wiring once we have a
+  baseline run on patched MLX to compare.
