@@ -28,6 +28,7 @@ M3 additions:
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from difflib import SequenceMatcher
@@ -37,6 +38,16 @@ import config as cfg
 from core.bus import Bus
 from core.metrics import MetricsLog, TurnMetrics, now
 from core.state import State, SysState
+
+
+_RELATED_STOPWORDS = {
+    "about", "after", "again", "also", "could", "does", "doing", "have",
+    "heard", "just", "like", "only", "really", "said", "should", "that",
+    "their", "there", "these", "thing", "think", "those", "what", "when",
+    "where", "which", "with", "would", "your",
+}
+_GATE_END_TAG = re.compile(r"</\s*(?:reply|ignore)\s*>", re.IGNORECASE)
+_MAX_GATE_END_TAG_LEN = len("</ignore>")
 
 
 class Orchestrator:
@@ -56,10 +67,17 @@ class Orchestrator:
         self._pending_text: str | None = None
         self._pending_ts: float = 0.0
 
+        # Active conversation window: after a real reply, brief follow-ups
+        # should be treated as addressed even without a wake word.
+        self._active_conversation_deadline: float = 0.0
+        self._turn_addressed_hint: bool = False
+        self._turn_retrying_ignore: bool = False
+
         # M3: LLM-gate state, reset at the start of each turn.
         self._gate_buffer: str = ""
         self._gate_decided: bool = False
         self._gate_ignore: bool = False
+        self._tts_stream_buffer: str = ""
 
         # M3: optional eval log for offline review.
         self._eval_log_path: Path | None = (
@@ -129,25 +147,67 @@ class Orchestrator:
             self._log_eval(text, "queued_pending")
             return
 
-        self._log_eval(text, "accepted")
-        self._start_turn(text)
+        addressed_hint = self._is_active_conversation() or self._looks_related(text)
+        self._log_eval(text, "accepted", addressed_hint=addressed_hint)
+        self._start_turn(text, addressed_hint=addressed_hint)
 
-    def _start_turn(self, text: str) -> None:
+    def _start_turn(
+        self,
+        text: str,
+        *,
+        addressed_hint: bool = False,
+        retrying_ignore: bool = False,
+    ) -> None:
         self.cur = TurnMetrics()
         self.cur.wake_ts = now()
         self.cur.listen_start_ts = self.cur.wake_ts
         self.cur.listen_end_ts = now()
         self.cur.stt_text = text
+        self._turn_addressed_hint = addressed_hint
+        self._turn_retrying_ignore = retrying_ignore
         self._gate_buffer = ""
         self._gate_decided = False
         self._gate_ignore = False
+        self._tts_stream_buffer = ""
         self.state.set(SysState.THINKING)
 
         print(f"[think]  {text!r}", flush=True)
         self._llm_thread = threading.Thread(
-            target=self.llm.ask_stream, args=(text,), daemon=True
+            target=self.llm.ask_stream,
+            args=(text,),
+            kwargs={"addressed_hint": addressed_hint},
+            daemon=True,
         )
         self._llm_thread.start()
+
+    def _is_active_conversation(self) -> bool:
+        return time.time() <= self._active_conversation_deadline
+
+    def _looks_related(self, text: str) -> bool:
+        text_terms = self._topic_terms(text)
+        if not text_terms:
+            return False
+
+        context_terms: set[str] = set()
+        for msg in self.llm.history_snapshot()[-6:]:
+            if msg.get("role") == "system":
+                continue
+            context_terms.update(self._topic_terms(msg.get("content", "")))
+
+        overlap = text_terms & context_terms
+        is_questionish = "?" in text or any(
+            text.lower().strip().startswith(prefix)
+            for prefix in ("what ", "why ", "how ", "do ", "does ", "did ", "is ", "are ")
+        )
+        return len(overlap) >= 2 or (is_questionish and len(overlap) >= 1)
+
+    def _topic_terms(self, text: str) -> set[str]:
+        words = re.findall(r"[a-z0-9']+", text.lower())
+        return {
+            w
+            for w in words
+            if len(w) > 3 and w not in _RELATED_STOPWORDS
+        }
 
     def _sounds_like_self(self, text: str) -> tuple[bool, float]:
         """Compare text to the most recent assistant reply in LLM history."""
@@ -195,7 +255,26 @@ class Orchestrator:
 
         if self.state.value != SysState.RESPONDING:
             self.state.set(SysState.RESPONDING)
-        self.tts.feed_text(delta)
+        self._feed_tts_delta(delta)
+
+    def _feed_tts_delta(self, delta: str) -> None:
+        """Forward streamed text to TTS while stripping late gate end-tags."""
+        self._tts_stream_buffer += delta
+        self._tts_stream_buffer = _GATE_END_TAG.sub("", self._tts_stream_buffer)
+
+        if len(self._tts_stream_buffer) <= _MAX_GATE_END_TAG_LEN:
+            return
+
+        emit = self._tts_stream_buffer[:-_MAX_GATE_END_TAG_LEN]
+        self._tts_stream_buffer = self._tts_stream_buffer[-_MAX_GATE_END_TAG_LEN:]
+        if emit:
+            self.tts.feed_text(emit)
+
+    def _flush_tts_stream_buffer(self) -> None:
+        tail = _GATE_END_TAG.sub("", self._tts_stream_buffer)
+        self._tts_stream_buffer = ""
+        if tail:
+            self.tts.feed_text(tail)
 
     def _gate_check(self) -> str:
         """Inspect ``self._gate_buffer`` and decide the gate. Returns the
@@ -209,8 +288,12 @@ class Orchestrator:
             self._gate_decided = True
             self._gate_ignore = True
             stt_text = self.cur.stt_text if self.cur else ""
-            print(f"[ignored by LLM] {stt_text!r}", flush=True)
-            self._log_eval(stt_text, "llm_ignored")
+            if self._turn_addressed_hint and not self._turn_retrying_ignore:
+                print(f"[LLM tried ignore on active follow-up] {stt_text!r}", flush=True)
+                self._log_eval(stt_text, "llm_tried_ignore_active_followup")
+            else:
+                print(f"[ignored by LLM] {stt_text!r}", flush=True)
+                self._log_eval(stt_text, "llm_ignored")
             return ""
 
         if reply_idx != -1:
@@ -236,9 +319,25 @@ class Orchestrator:
         if not self._gate_decided and self._gate_buffer:
             self._gate_decided = True
             self._gate_ignore = False
-            self.tts.feed_text(self._gate_buffer)
+            self._feed_tts_delta(self._gate_buffer)
 
         if self._gate_ignore:
+            if (
+                self._turn_addressed_hint
+                and not self._turn_retrying_ignore
+                and self.cur
+                and self.cur.stt_text
+            ):
+                text = self.cur.stt_text
+                print(f"[active follow-up retry] {text!r}", flush=True)
+                self._log_eval(text, "active_followup_retry")
+                self.llm.discard_last_turn()
+                self._start_turn(
+                    text,
+                    addressed_hint=True,
+                    retrying_ignore=True,
+                )
+                return
             # TTS never started; do the IDLE handoff ourselves so the next
             # turn (or pending-turn slot) can fire.
             self.llm.discard_last_turn()
@@ -246,16 +345,22 @@ class Orchestrator:
             return
 
         # Synthesize whatever tail is still buffered in TTS.
+        self._flush_tts_stream_buffer()
         self.tts.flush()
         if reply:
             print(f"[reply]  {reply!r}", flush=True)
 
     def _on_tts_done(self) -> None:
+        was_ignored = self._gate_ignore
         if self.cur:
             self.cur.tts_end_ts = now()
             self.metrics.write(self.cur)
             self.cur = None
         self.state.set(SysState.IDLE)
+        if not was_ignored:
+            self._active_conversation_deadline = (
+                time.time() + cfg.ACTIVE_CONVERSATION_TIMEOUT_S
+            )
         # Open a wake-word-free follow-up window for the next utterance.
         # (No-op when REQUIRE_WAKE_WORD = False — STT is already always-on.)
         self.stt.open_followup()

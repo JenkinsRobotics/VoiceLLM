@@ -97,6 +97,7 @@ def main() -> int:
     assert len(llm.history_snapshot()) == 1
     assert stt.followups == 1
     assert clean_for_tts("<reply>Hello there.") == "Hello there."
+    assert clean_for_tts("<reply>Hello there.</reply>") == "Hello there."
     assert clean_for_tts("<ignore>") == ""
 
     print("Smoke OK: ignored turns are silent, history is clean, orchestrator idles.")

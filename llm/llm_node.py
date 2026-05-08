@@ -23,7 +23,7 @@ def clean_for_tts(text: str) -> str:
     text = re.sub(r"\*+", "", text)
     text = re.sub(r"^[\-\*\d\.\)]+\s+", "", text, flags=re.MULTILINE)
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
-    text = re.sub(r"^\s*<(?:reply|ignore)>\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"</?\s*(?:reply|ignore)\s*>\s*", " ", text, flags=re.IGNORECASE)
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -85,11 +85,22 @@ class LLMNode:
             ):
                 del self.history[-2:]
 
-    def ask_stream(self, user_text: str) -> None:
+    def ask_stream(self, user_text: str, *, addressed_hint: bool = False) -> None:
         """Append user_text, stream deltas to the bus, append final reply."""
         with self._lock:
             self.history.append({"role": "user", "content": user_text})
             messages = list(self.history)
+            if addressed_hint:
+                messages[-1] = {
+                    "role": "user",
+                    "content": (
+                        "This transcript is inside an active conversation or "
+                        "appears related to the current topic. Treat it as "
+                        "addressed to you unless it is clearly ambient speech "
+                        "or your own echoed voice. Respond to the actual user "
+                        f"message:\n{user_text}"
+                    ),
+                }
 
         parts: list[str] = []
         try:

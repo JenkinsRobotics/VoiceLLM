@@ -22,7 +22,15 @@ import numpy as np
 import sounddevice as sd
 
 
-_SENT_END = re.compile(r"[.!?](?:\s|$)")
+_SENT_END = re.compile(r"[.!?][\"')\]\}»”’]*(?=\s|$)")
+_PARAGRAPH_BREAK = re.compile(r"\n[ \t]*\n+")
+_FALLBACK_MIN_CHARS = 240
+_SOFT_SEPARATORS = (
+    re.compile(r"\n+"),
+    re.compile(r"[,;:][\"')\]\}»”’]*(?=\s|$)"),
+    re.compile(r"\s[-–—]\s"),
+    re.compile(r"\s+"),
+)
 
 
 @dataclass
@@ -39,7 +47,7 @@ class KokoroNode:
         voice: str,
         lang: str,
         sr: int = 24000,
-        min_chars: int = 60,
+        min_chars: int = _FALLBACK_MIN_CHARS,
         tail_sleep_s: float = 0.12,
         output_device=None,
     ) -> None:
@@ -55,7 +63,9 @@ class KokoroNode:
         self.bus = bus
         self.voice = voice
         self.sr = sr
-        self.min_chars = min_chars
+        # Older config used 60 chars, which can fire mid-sentence. Keep the
+        # public knob, but only allow it to raise the fallback threshold.
+        self.min_chars = max(min_chars, _FALLBACK_MIN_CHARS)
         self.tail_sleep_s = tail_sleep_s
         self.output_device = output_device
 
@@ -88,16 +98,36 @@ class KokoroNode:
     # ── Internals ──────────────────────────────────────────────────────
 
     def _pop_sentence(self, buf: str, *, force: bool) -> tuple[str, str]:
-        """Return (sentence, remaining_buf); sentence='' if nothing to pop yet."""
-        m = _SENT_END.search(buf)
-        if m:
-            cut = m.end()
-        elif force or len(buf) >= self.min_chars:
+        """Return (text, remaining_buf); text='' if nothing to pop yet."""
+        cut = self._boundary_cut(buf)
+        if cut is None and len(buf) >= self.min_chars:
+            cut = self._soft_fallback_cut(buf)
+        if cut is None:
+            if not force:
+                return "", buf
             cut = len(buf)
-        else:
-            return "", buf
-        sentence = buf[:cut].strip()
-        return sentence, buf[cut:]
+
+        text = buf[:cut].strip()
+        return text, buf[cut:]
+
+    def _boundary_cut(self, buf: str) -> int | None:
+        sentence = _SENT_END.search(buf)
+        paragraph = _PARAGRAPH_BREAK.search(buf)
+        cuts = [m.end() for m in (sentence, paragraph) if m]
+        if not cuts:
+            return None
+        cut = min(cuts)
+        while cut < len(buf) and buf[cut].isspace():
+            cut += 1
+        return cut
+
+    def _soft_fallback_cut(self, buf: str) -> int | None:
+        window = buf[:self.min_chars]
+        for pattern in _SOFT_SEPARATORS:
+            matches = list(pattern.finditer(window))
+            if matches:
+                return matches[-1].end()
+        return None
 
     def _synth_loop(self) -> None:
         buf = ""

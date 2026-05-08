@@ -47,6 +47,8 @@ SYSTEM_PROMPT = (
     "  <reply>   — input is a real directed turn for you. Follow the tag "
     "with 1 to 3 short sentences of natural conversational English. No "
     "markdown, lists, code blocks, or emoji. If unsure, say so briefly.\n\n"
+    "A follow-up question or comment that continues the current topic is "
+    "addressed to you, even if it does not repeat your name or a wake word.\n\n"
     "Examples:\n"
     "  '[BLANK_AUDIO]' → <ignore>\n"
     "  'test' → <ignore>\n"
@@ -101,7 +103,11 @@ WAKE_PREFIXES = ("ok", "okay", "hey")
 ASSISTANT_NAMES = ("jaeger", "yeager", "yager", "jager")
 WAKE_PHRASES = tuple(f"{p} {n}" for p in WAKE_PREFIXES for n in ASSISTANT_NAMES)
 WAKE_MATCH_THRESHOLD = 0.78
-FOLLOWUP_WINDOW_S = 10.0
+FOLLOWUP_WINDOW_S = 15.0
+
+# After a real assistant reply, short follow-ups are presumed to be part of
+# the same conversation. The orchestrator also uses this to hint the LLM gate.
+ACTIVE_CONVERSATION_TIMEOUT_S = 15.0
 
 # ── M3 continuous-mode guards ──────────────────────────────────────────
 # Self-speech filter: if an STT commit is >= this similar to the most
@@ -143,7 +149,7 @@ MIC_QUEUE_MAX_FRAMES = 200
 KOKORO_VOICE = "af_heart"
 KOKORO_LANG = "a"
 TTS_SAMPLE_RATE = 24000
-TTS_MIN_CHARS = 60      # synthesize partial when sentence is long but no period yet
+TTS_MIN_CHARS = 240     # fallback for long text without sentence/paragraph breaks
 TTS_TAIL_SLEEP_S = 0.12 # let speakers drain before un-pausing mic
 
 # ── Behavior flags (M2 defaults; M3+M4 flip these) ─────────────────────
