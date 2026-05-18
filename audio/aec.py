@@ -1,8 +1,13 @@
 import numpy as np
-from config import AEC_ENABLED
+from config import AEC_ENABLED, AEC_FILTER_LENGTH, AEC_FRAME_MS, SAMPLE_RATE
 
 class AECWrapper:
-    def __init__(self, sample_rate=16000, frame_ms=10, filter_ms=200):
+    def __init__(
+        self,
+        sample_rate: int = SAMPLE_RATE,
+        frame_ms: int = AEC_FRAME_MS,
+        filter_length: int = AEC_FILTER_LENGTH,
+    ):
         self.sr = sample_rate
         self.frame = int(sample_rate * frame_ms / 1000)
         self.impl = None
@@ -11,8 +16,7 @@ class AECWrapper:
             return
         try:
             from speexdsp import EchoCanceller  # type: ignore
-            filt_len = int(sample_rate * filter_ms / 1000)
-            self.impl = EchoCanceller(self.frame, filt_len)
+            self.impl = EchoCanceller(self.frame, filter_length)
             self._backend = "speexdsp"
         except Exception:
             self.impl = None

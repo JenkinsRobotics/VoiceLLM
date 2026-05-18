@@ -1,0 +1,13 @@
+name: whisper_stt
+kind: plugin
+description: pywhispercpp speech-to-text pipelines for VoiceLLM.
+claims:
+  hardware: [microphone]
+uses:
+  libraries: [pywhispercpp, webrtcvad, sounddevice]
+  models: [base.en, medium.en]
+provides:
+  bus_topics: [stt.text]
+entrypoints:
+  two_pass: plugins.whisper_stt.two_pass:STTTwoPassNode
+  continuous: plugins.whisper_stt.continuous:STTContinuousNode

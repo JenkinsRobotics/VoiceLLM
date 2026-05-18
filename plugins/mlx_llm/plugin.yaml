@@ -1,0 +1,8 @@
+name: mlx_llm
+kind: plugin
+description: mlx-lm Apple Silicon chat backend.
+uses:
+  libraries: [mlx-lm]
+  models: [gemma-4-26b-a4b-4bit]
+provides:
+  backend: plugins.mlx_llm.backend:MLXBackend

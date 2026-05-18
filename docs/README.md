@@ -1,8 +1,8 @@
 # VoiceLLM planning docs
 
 **Picking this up cold? Start with [STATUS.md](STATUS.md)** — it summarizes
-where we are (M2 done), what's next (M3 continuous hearing, M4 barge-in),
-and known gotchas.
+where we are, what is complete in this repo, which ideas are carry-forward
+items for newer frameworks, and known gotchas.
 
 Then read in order:
 
@@ -22,8 +22,13 @@ Then read in order:
    M0 → M5, each ending in a runnable demo.
 8. [07_open_questions.md](07_open_questions.md) — unresolved design
    choices. Worth scanning before starting M2.
+9. [08_vocabulary_contract.md](08_vocabulary_contract.md) — naming rules for
+   tools, skills, plugins, runners, libraries, artifacts, transports, and
+   hardware.
 
-The MockingAgent reference files these plans cite live in:
+Local copies of the two pasted reference scripts live in
+[../references/](../references/). The broader MockingAgent reference files
+these plans cite live in:
 
 - [MockingAgent/voice_assistant.py](../../MockingAgent/voice_assistant.py)
 - [MockingAgent/ollamacpp/chat_mlx.py](../../MockingAgent/ollamacpp/chat_mlx.py)

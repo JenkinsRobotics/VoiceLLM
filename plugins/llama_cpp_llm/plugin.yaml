@@ -1,0 +1,8 @@
+name: llama_cpp_llm
+kind: plugin
+description: llama-cpp-python GGUF chat backend.
+uses:
+  libraries: [llama-cpp-python]
+  models: [gemma-4-26B-A4B-it-Q4_K_M.gguf]
+provides:
+  backend: plugins.llama_cpp_llm.backend:LlamaCppBackend

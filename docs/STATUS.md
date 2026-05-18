@@ -4,9 +4,10 @@
 [06_milestones.md](06_milestones.md) for the milestone definitions and
 [01_architecture.md](01_architecture.md) for the module/bus layout.
 
-Last updated: **2026-05-07**. M2 complete; M3 quick path shipped; M3.5
-continuous STT in tree (opt-in via `STT_MODE`); LLM-gated speech protocol
-shipped; both Whisper sizes eager-loaded with real warm-up.
+Last updated: **2026-05-17**. Current voice-loop milestone complete. M2
+complete; M3 quick path shipped; M3.5 continuous STT in tree (opt-in via
+`STT_MODE`); LLM-gated speech protocol shipped; both Whisper sizes eager-loaded
+with real warm-up; plugin/runner/memory-oriented folder structure in place.
 
 ---
 
@@ -14,11 +15,12 @@ shipped; both Whisper sizes eager-loaded with real warm-up.
 
 Modular, bus-driven local voice assistant on Apple Silicon. All code lives
 at the repo root (this `docs/` folder is a sibling of `config.py`,
-`main.py`, `core/`, `stt/`, `llm/`, `tts/`, `audio/`, `orchestrator/`).
-Demo/reference code that informed the design lives in the sibling
-[MockingAgent/](../../MockingAgent/) repo (notably
-[voice_assistant.py](../../MockingAgent/voice_assistant.py) — the
-proven Google-Home-style baseline we ported from).
+`main.py`, `core/`, `plugins/`, `audio/`, `memory/`).
+Demo/reference code that informed the design lives in [references/](../references/)
+and the sibling [MockingAgent/](../../MockingAgent/) repo. The local
+`references/voice_assistant.py` is the proven Google-Home-style baseline we
+ported from, and `references/voice_chat.py` preserves the full-duplex
+AEC/barge-in experiment as carry-forward design material.
 
 **Stack:** sounddevice + WebRTC VAD → pywhispercpp (whisper.cpp) → swappable
 LLM (`llama-cpp-python` default *or* `mlx-lm`, both running **Gemma 4
@@ -28,7 +30,7 @@ LLM (`llama-cpp-python` default *or* `mlx-lm`, both running **Gemma 4
 backends supported; `LLM_BACKEND = "llamacpp"` is the default since
 llama-cpp-python handles Gemma's `<end_of_turn>` natively. The MLX backend
 now stops correctly via an in-stream marker detector
-([backend_mlx.py](../llm/backend_mlx.py)) — the old `eot_token` getattr was
+([plugins/mlx_llm/backend.py](../plugins/mlx_llm/backend.py)) — the old `eot_token` getattr was
 a no-op and let Gemma run to `max_tokens` and loop.
 
 **M3 status (quick path): shipped.** No wake word in the default mode.
@@ -37,7 +39,7 @@ pending-turn queue, and the **LLM gate** — every reply must begin with
 `<ignore>` or `<reply>`; ignored replies are suppressed from TTS without
 audible cost. Every decision is logged to `outputs/m3_eval.jsonl`.
 
-**M3.5 status: in tree, opt-in.** [stt/stt_continuous.py](../stt/stt_continuous.py)
+**M3.5 status: in tree, opt-in.** [plugins/whisper_stt/continuous.py](../plugins/whisper_stt/continuous.py)
 is a drop-in replacement for `STTTwoPassNode` with rolling re-transcription
 and energy-based phrase segmentation. Activate via
 `STT_MODE = "continuous"` in [config.py](../config.py). Default stays
@@ -47,6 +49,11 @@ and energy-based phrase segmentation. Activate via
 TTS) happen at startup with real warm passes — first user turn pays only
 inference time, not setup. Conversation history is capped at
 `MAX_HISTORY_TURNS = 8` user/assistant pairs to keep prompt size bounded.
+
+**Continuation note:** Further advanced work is unlikely to continue in this
+repo. Treat M4 barge-in/AEC, persistent memory, LLM-callable tools, and skills
+as carry-forward ideas for newer AgenticLLM-style frameworks unless this repo is
+explicitly revived.
 
 ---
 
@@ -59,7 +66,7 @@ python main.py
 # Flip back to True in config.py for the wake-word "okay jaeger" flow.
 ```
 
-This reproduces [MockingAgent/voice_assistant.py](../../MockingAgent/voice_assistant.py)'s
+This reproduces [references/voice_assistant.py](../references/voice_assistant.py)'s
 behavior, but every concern is now its own node communicating over the bus.
 
 ### Modules in place
@@ -71,16 +78,16 @@ behavior, but every concern is now its own node communicating over the bus.
 | [core/state.py](../core/state.py) | `SysState`: `IDLE`/`THINKING`/`RESPONDING`. |
 | [core/metrics.py](../core/metrics.py) | Per-turn timing → `metrics.csv`. |
 | [audio/mic_stream.py](../audio/mic_stream.py) | `MicStream` with `paused` flag (ported from voice_assistant.py:96-125). |
-| [audio/vad.py](../audio/vad.py), [audio/aec.py](../audio/aec.py), [audio/wakeword.py](../audio/wakeword.py) | Existing — used in M4 (AEC) and the legacy `stt_node.py`; **not yet wired** into the new flow. |
-| [stt/stt_two_pass.py](../stt/stt_two_pass.py) | Two-pass cascade ported from voice_assistant.py: VAD worker, fast (`base.en`) + accurate (`medium.en`) eager-loaded with silence warm-up, wake-word + follow-up window. Publishes `stt.text`. |
-| [stt/stt_continuous.py](../stt/stt_continuous.py) | M3.5 hybrid pipeline. Energy-based phrase segmentation, rolling re-transcription. Drop-in interface match for `STTTwoPassNode`. |
-| [stt/stt_node.py](../stt/stt_node.py) | Old VAD-segmented Whisper node. **Unused** — slated for deletion in M5. |
-| [llm/backend_base.py](../llm/backend_base.py) | `BackendBase` ABC: `load`, `warm`, `stream_chat`, `cancel`. |
-| [llm/backend_mlx.py](../llm/backend_mlx.py) | mlx-lm impl. In-stream stop-marker detector for `<end_of_turn>` / `<eos>` / `<im_end>` (replaces the old broken `eot_token` getattr). |
-| [llm/backend_llamacpp.py](../llm/backend_llamacpp.py) | llama-cpp-python impl. Default backend; chat completion handles Gemma's stop tokens natively. |
-| [llm/llm_node.py](../llm/llm_node.py) | Owns history; streams `llm.token` deltas; publishes cleaned reply on `llm.done`. Caps history at `MAX_HISTORY_TURNS = 8` pairs. `clean_for_tts()` ported. |
-| [tts/kokoro_node.py](../tts/kokoro_node.py) | Real `KPipeline`. Synth thread + play thread. Sentence-streams. Cancellable. Publishes `mic.pause`, `tts.audio_chunk`, `tts.done`. |
-| [orchestrator/orchestrator.py](../orchestrator/orchestrator.py) | Single bus consumer; state machine; spawns LLM thread per turn; **LLM-gate token buffer** (`<ignore>` suppresses TTS, `<reply>` forwards the tail). |
+| [audio/chimes.py](../audio/chimes.py) | Wake and follow-up earcons, controlled by `CHIMES_ENABLED`, `WAKE_CHIME_ENABLED`, and `FOLLOWUP_CHIME_ENABLED`. |
+| [audio/vad.py](../audio/vad.py), [audio/aec.py](../audio/aec.py), [audio/wakeword.py](../audio/wakeword.py) | Existing — used in M4 (AEC) and legacy references; **not yet wired** into the new flow. |
+| [plugins/whisper_stt/two_pass.py](../plugins/whisper_stt/two_pass.py) | Two-pass cascade ported from voice_assistant.py: VAD worker, fast (`base.en`) + accurate (`medium.en`) eager-loaded with silence warm-up, wake-word + follow-up window. Publishes `stt.text`. |
+| [plugins/whisper_stt/continuous.py](../plugins/whisper_stt/continuous.py) | M3.5 hybrid pipeline. Energy-based phrase segmentation, rolling re-transcription. Drop-in interface match for `STTTwoPassNode`. |
+| [plugins/llm_core/backend_base.py](../plugins/llm_core/backend_base.py) | `BackendBase` ABC: `load`, `warm`, `stream_chat`, `cancel`. |
+| [plugins/mlx_llm/backend.py](../plugins/mlx_llm/backend.py) | mlx-lm impl. In-stream stop-marker detector for `<end_of_turn>` / `<eos>` / `<im_end>` (replaces the old broken `eot_token` getattr). |
+| [plugins/llama_cpp_llm/backend.py](../plugins/llama_cpp_llm/backend.py) | llama-cpp-python impl. Default backend; chat completion handles Gemma's stop tokens natively. |
+| [plugins/llm_core/node.py](../plugins/llm_core/node.py) | Owns history; streams `llm.token` deltas; publishes cleaned reply on `llm.done`. Caps history at `MAX_HISTORY_TURNS = 8` pairs. `clean_for_tts()` ported. |
+| [plugins/kokoro_tts/node.py](../plugins/kokoro_tts/node.py) | Real `KPipeline`. Synth thread + play thread. Sentence-streams. Cancellable. Publishes `mic.pause`, `tts.audio_chunk`, `tts.done`. |
+| [core/runners/orchestrator.py](../core/runners/orchestrator.py) | Single bus consumer; state machine; spawns LLM thread per turn; **LLM-gate token buffer** (`<ignore>` suppresses TTS, `<reply>` forwards the tail). |
 | [main.py](../main.py) | `make_backend()` + `make_stt()` factory funcs, then `Orchestrator(...).run()`. |
 
 ### Bus topics in use
@@ -124,7 +131,8 @@ GITHUB/
 └── VoiceLLM/                           # ← THE CODE (flat at the repo root)
     ├── config.py
     ├── main.py
-    ├── audio/  core/  llm/  stt/  tts/  orchestrator/
+    ├── audio/  core/  plugins/  memory/
+    ├── references/                     # local copies of pasted reference scripts
     ├── docs/                           # ← these planning docs
     ├── outputs/                        # m3_eval.jsonl etc.
     ├── requirements.txt
@@ -136,7 +144,11 @@ GITHUB/
 
 ---
 
-## What's next (build order)
+## Carry-Forward Ideas
+
+The sections below are preserved as design notes and possible implementation
+recipes. They are not an active roadmap for this repository unless development
+is explicitly resumed here.
 
 ### M3 — Continuous hearing (the actual goal)
 
@@ -150,7 +162,7 @@ We split this into a **quick path** (lean on the existing two-pass STT) and
 
 1. ✅ **`REQUIRE_WAKE_WORD = False`** in [config.py](../config.py). The
    existing `STTTwoPassNode` already has the no-wake-word branch
-   ([stt_two_pass.py](../stt/stt_two_pass.py)) — every phrase becomes a turn.
+   ([plugins/whisper_stt/two_pass.py](../plugins/whisper_stt/two_pass.py)) — every phrase becomes a turn.
 2. ✅ **Self-speech similarity filter** on `stt.text` ingress in the
    orchestrator. Compares incoming text against the most recent `assistant`
    turn from `LLMNode.history_snapshot()` via `difflib.SequenceMatcher`;
@@ -170,7 +182,7 @@ We split this into a **quick path** (lean on the existing two-pass STT) and
    - `<reply>` → forwards the post-tag tail to TTS as normal.
    Falls back to "treat as reply" if the tag never appears within the
    buffer. See `_on_llm_token` and `_gate_check` in
-   [orchestrator/orchestrator.py](../orchestrator/orchestrator.py).
+   [core/runners/orchestrator.py](../core/runners/orchestrator.py).
 5. ✅ **Eval logging** — every STT decision (`accepted` /
    `dropped_self_echo` / `queued_pending` / `pending_fired` /
    `pending_stale` / `llm_ignored`) is appended to
@@ -194,7 +206,7 @@ Only do this once the quick path is verified and we hit a quality wall the
 filter+queue can't paper over (e.g. trailing-word loss on long sentences).
 
 1. ✅ **Port** [always_listening_hybrid_phrase_word_pipeline.py](../../MockingAgent/PywisperCpp/pywhispercpp_examples/llm_listener/always_listening_hybrid_phrase_word_pipeline.py)
-   to [stt/stt_continuous.py](../stt/stt_continuous.py). Same node
+   to [plugins/whisper_stt/continuous.py](../plugins/whisper_stt/continuous.py). Same node
    interface as `STTTwoPassNode` (publishes `stt.text`, has
    `start`/`stop`/`set_paused`/`open_followup`). Energy-based phrase
    segmentation; rolling re-transcription every
@@ -250,12 +262,12 @@ Talk over the assistant; it cuts off and listens.
 2. **TTS publishes `mic.pause` *before* `sd.play()` returns.** The
    orchestrator forwards it to `STTTwoPassNode.set_paused()` which calls
    `MicStream.set_paused()`. Check the exact ordering in
-   [tts/kokoro_node.py:_play_loop](../tts/kokoro_node.py) before tightening
+   [plugins/kokoro_tts/node.py:_play_loop](../plugins/kokoro_tts/node.py) before tightening
    barge-in timing — there's a `tail_sleep_s = 0.12` to let speakers drain
    before un-pausing the mic.
-3. **The legacy `stt/stt_node.py` and `audio/audio_io.py`** are still in
-   tree but unused. They use `tempfile`-based whisper transcription and a
-   different mic abstraction. Don't import them from new code; either
+3. **The legacy `references/stt_node_legacy.py` and `audio/audio_io.py`** are
+   still in tree but unused. They use `tempfile`-based whisper transcription
+   and a different mic abstraction. Don't import them from new code; either
    remove or leave as historical reference. Decision deferred to M5.
 4. **`webrtcvad` vs `webrtcvad-wheels`**: requirements.txt asks for
    `-wheels` (prebuilt). The old root requirements named bare `webrtcvad`
@@ -263,7 +275,7 @@ Talk over the assistant; it cuts off and listens.
 5. **Gemma 4 in `mlx-lm`** doesn't stop on `<end_of_turn>` by default —
    the tokenizer wrapper's API for additional EOS tokens varies by mlx-lm
    version. We solved it via an in-stream stop-marker detector in
-   [backend_mlx.py:stream_chat()](../llm/backend_mlx.py) that buffers the
+   [plugins/mlx_llm/backend.py:stream_chat()](../plugins/mlx_llm/backend.py) that buffers the
    last 32 chars of streamed text and stops when it sees `<end_of_turn>`,
    `<eos>`, or `<|im_end|>`. Without this fix, MLX runs to `max_tokens`
    and loops.
@@ -272,8 +284,8 @@ Talk over the assistant; it cuts off and listens.
    1-token gen (~1-2 s), both Whisper sizes plus a 1.5 s silence transcribe
    each (~1-2 s combined). First user turn then pays only inference time.
 7. **Whisper warm-up needs ≥1000 ms of audio**; we use 1.5 s of silence
-   in [stt_two_pass.py:_warm_stt()](../stt/stt_two_pass.py) and
-   [stt_continuous.py](../stt/stt_continuous.py). Sub-1000-ms warm
+   in [plugins/whisper_stt/two_pass.py:_warm_stt()](../plugins/whisper_stt/two_pass.py) and
+   [plugins/whisper_stt/continuous.py](../plugins/whisper_stt/continuous.py). Sub-1000-ms warm
    transcribes get rejected by Whisper with `input is too short - ... ms`
    and silently skip inference, defeating the whole point.
 8. **macOS mic permission**: launching from VS Code's terminal sometimes
@@ -288,10 +300,11 @@ Talk over the assistant; it cuts off and listens.
 # Compile-check all M2 + M3.5 modules:
 cd VoiceLLM
 python -m py_compile config.py main.py \
-  llm/backend_base.py llm/backend_mlx.py llm/backend_llamacpp.py llm/llm_node.py \
-  tts/kokoro_node.py audio/mic_stream.py \
-  stt/stt_two_pass.py stt/stt_continuous.py \
-  orchestrator/orchestrator.py core/bus.py core/state.py core/metrics.py
+  plugins/llm_core/backend_base.py plugins/mlx_llm/backend.py \
+  plugins/llama_cpp_llm/backend.py plugins/llm_core/node.py \
+  plugins/kokoro_tts/node.py audio/mic_stream.py audio/chimes.py \
+  plugins/whisper_stt/two_pass.py plugins/whisper_stt/continuous.py \
+  core/runners/orchestrator.py core/bus.py core/state.py core/metrics.py
 
 # Confirm models exist:
 python -c "import config as c; print('mlx:', c.MLX_PATH.exists(), 'gguf:', c.GGUF_PATH.exists())"
@@ -306,9 +319,9 @@ python main.py
 
 1. Read this file.
 2. Read [00_overview.md](00_overview.md) and [01_architecture.md](01_architecture.md).
-3. Read [voice_assistant.py](../../MockingAgent/voice_assistant.py) — that
+3. Read [references/voice_assistant.py](../references/voice_assistant.py) — that
    is the canonical reference for *every* STT/TTS/LLM glue decision in M2.
 4. Read [02_stt_pipelines.md](02_stt_pipelines.md) before touching M3.
-5. Don't refactor the legacy files (`stt/stt_node.py`,
-   `audio/audio_io.py`, the old `kokoro_node.py` was already replaced) —
+5. Don't refactor the legacy files (`references/stt_node_legacy.py`,
+   `audio/audio_io.py`) —
    delete them in M5 if they're still unused.

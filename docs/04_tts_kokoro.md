@@ -76,7 +76,7 @@ class KokoroNode:
         self.cancel_event.clear()
 ```
 
-That's a sketch — the real version goes in `tts/kokoro_node.py`.
+That's a sketch — the real version lives in `plugins/kokoro_tts/node.py`.
 
 ## Voice and language
 
@@ -95,7 +95,7 @@ extra downloads.
 
 Match the LLM stream cadence — fire on the first sentence end *or* after
 ~60 chars without one (so a long sentence doesn't stall). The regex from
-the existing `kokoro_node.py` (`r'[.!?]\s'`) is fine; loosen the trailing
+the existing `plugins/kokoro_tts/node.py` heuristic is fine; loosen the trailing
 whitespace requirement so we catch end-of-stream punctuation:
 
 ```python

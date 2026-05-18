@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Iterator
 
-from .backend_base import BackendBase
+from plugins.llm_core.backend_base import BackendBase
 
 
 class LlamaCppBackend(BackendBase):

@@ -5,9 +5,13 @@ Silicon. Speak naturally; the assistant streams a spoken reply back; the
 conversation keeps going without a wake word. Think ChatGPT Voice, fully
 offline.
 
-> Status: **active development**. M2 (modular voice loop) and M3 (continuous
-> hearing) ship working. M4 (barge-in) is next. See
-> [docs/STATUS.md](docs/STATUS.md) for the live handoff.
+> Status: **current voice-loop milestone complete**. The modular local
+> assistant, plugin-style STT/TTS/LLM organization, continuous hearing,
+> LLM-gated speech, self-speech rejection, streaming Kokoro TTS, and chimes are
+> in place. Further advanced work is unlikely to continue here; the likely path
+> is carrying ideas such as full-duplex AEC/barge-in, persistent memory, and
+> LLM-callable tools into newer AgenticLLM-style frameworks. See
+> [docs/STATUS.md](docs/STATUS.md) for the handoff notes.
 
 ## What it does today
 
@@ -26,7 +30,10 @@ offline.
   fast→accurate Whisper cascade) and `continuous` (rolling re-transcription
   hybrid). `STT_MODE` flag selects.
 - **Self-speech rejection.** Mic-pause during TTS plus a similarity filter
-  against the most recent reply. M4 will add AEC for true barge-in.
+  against the most recent reply. Full-duplex AEC/barge-in is preserved as
+  carry-forward design work rather than expected development in this repo.
+- **Friendly chimes.** A short wake chime acknowledges wake-only prompts, and
+  a double chime marks that the assistant is ready for a follow-up.
 - **Streaming TTS** via [Kokoro](https://github.com/hexgrad/kokoro). Audio
   starts at the first sentence boundary, not after the full reply.
 
@@ -41,8 +48,32 @@ offline.
 | TTS | `kokoro` (`KPipeline`) |
 
 State and routing run through a single in-process pub/sub `Bus` consumed by
-the orchestrator state machine
+the runner in [core/runners/orchestrator.py](core/runners/orchestrator.py)
 (`IDLE → THINKING → RESPONDING → IDLE`).
+
+## Current status
+
+I would call this project **complete for the current local voice assistant
+milestone**. It is not intended to become the main open-ended assistant
+platform; advanced continuation work is expected to move into newer frameworks
+such as AgenticLLM.
+
+Done:
+
+- Runnable local voice loop through `python main.py`.
+- Plugin-style layout for STT, TTS, and LLM integrations.
+- Runner classification for the orchestrator.
+- Continuous-hearing default with optional wake-word mode.
+- LLM gate for ignoring ambient/non-directed speech.
+- Mic-pause plus similarity filtering for self-speech rejection.
+- Streaming Kokoro TTS and configurable wake/follow-up chimes.
+
+Carry-forward ideas:
+
+- True full-duplex AEC/barge-in.
+- Persistent memory beyond in-session conversation history.
+- LLM-callable tools or skills.
+- GUI or device/voice picker.
 
 ## Quick start
 
@@ -87,6 +118,7 @@ All tunables live in [config.py](config.py). The flags you'll touch most:
 | `LLM_TEMPERATURE` | `0.6` | LLM sampling temperature |
 | `MAX_HISTORY_TURNS` | `8` | rolling user/assistant pair cap |
 | `KOKORO_VOICE` | `"af_heart"` | Kokoro voice id |
+| `CHIMES_ENABLED` | `True` | master switch for wake/follow-up audio cues |
 
 See [config.py](config.py) for the full list (VAD aggressiveness, phrase
 timeouts, energy thresholds, etc.).
@@ -97,20 +129,30 @@ timeouts, energy thresholds, etc.).
 VoiceLLM/
 ├── config.py                  # all tunables
 ├── main.py                    # build bus + nodes, start orchestrator
-├── core/                      # bus, state machine, metrics
+├── core/                      # bus, state, metrics, runners, future tools
+│   ├── runners/               # framework-owned loops (orchestrator)
+│   └── tools/                 # future LLM-callable tools
 ├── audio/                     # MicStream, VAD, AEC (M4)
-├── stt/                       # stt_two_pass.py, stt_continuous.py
-├── llm/                       # backend_base + backend_mlx + backend_llamacpp + llm_node
-├── tts/                       # kokoro_node.py
-├── orchestrator/              # bus consumer, state machine, LLM gate
+├── plugins/                   # STT, TTS, and LLM integrations
+│   ├── whisper_stt/           # two_pass.py, continuous.py
+│   ├── kokoro_tts/            # Kokoro playback node
+│   ├── llama_cpp_llm/         # GGUF backend
+│   ├── mlx_llm/               # MLX backend
+│   └── llm_core/              # shared LLM bus adapter/base class
+├── memory/                    # future persistent memory
+├── references/                # pasted historical scripts, not imported
 ├── docs/                      # architecture / milestones / status
 ├── outputs/                   # m3_eval.jsonl (runtime decision log)
 └── metrics.csv                # per-turn timing log
 ```
 
+Vocabulary-wise: STT/TTS/LLM are **plugins**, the orchestrator is a
+framework-owned **runner**, `core/bus.py` is transport infrastructure, and
+`core/tools/` is intentionally empty until VoiceLLM grows model-callable tools.
+
 ## Documentation
 
-- [docs/STATUS.md](docs/STATUS.md) — current state and what's next.
+- [docs/STATUS.md](docs/STATUS.md) — completion state and handoff notes.
 - [docs/00_overview.md](docs/00_overview.md) — design intent.
 - [docs/01_architecture.md](docs/01_architecture.md) — module/bus layout.
 - [docs/02_stt_pipelines.md](docs/02_stt_pipelines.md) — STT strategies.
@@ -119,6 +161,7 @@ VoiceLLM/
 - [docs/05_barge_in_and_self_speech.md](docs/05_barge_in_and_self_speech.md) — barge-in + self-speech.
 - [docs/06_milestones.md](docs/06_milestones.md) — build order M0–M5.
 - [docs/07_open_questions.md](docs/07_open_questions.md) — design questions.
+- [docs/08_vocabulary_contract.md](docs/08_vocabulary_contract.md) — component naming and future plugin/skill layout.
 
 ## Acknowledgments
 

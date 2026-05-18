@@ -361,6 +361,9 @@ class Orchestrator:
             self._active_conversation_deadline = (
                 time.time() + cfg.ACTIVE_CONVERSATION_TIMEOUT_S
             )
+            play_chime = getattr(self.stt, "play_chime", None)
+            if callable(play_chime):
+                play_chime("followup")
         # Open a wake-word-free follow-up window for the next utterance.
         # (No-op when REQUIRE_WAKE_WORD = False — STT is already always-on.)
         self.stt.open_followup()

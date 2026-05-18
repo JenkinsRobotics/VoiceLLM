@@ -6,9 +6,10 @@ Each concern is a node. Nodes never call each other directly — they
 publish/subscribe to a message bus. That way we can swap any one
 (LLM backend, STT strategy, TTS engine) without rewriting the others.
 
-All code lives at the repo root: `core/bus.py`, `orchestrator/`, `llm/`,
-`stt/`, `tts/`, `audio/`. We are *keeping* that scaffold and tightening
-the contracts.
+All code lives at the repo root. Framework infrastructure is under `core/`,
+external integrations are under `plugins/`, reusable audio helpers are under
+`audio/`, future persistent memory is under `memory/`, and historical demos
+live in `references/`.
 
 ## Module map
 
@@ -18,10 +19,13 @@ VoiceLLM/                      # repo root
 │                              # backend selection, model paths, prompts)
 ├── main.py                    # build bus + nodes, start orchestrator
 │
-├── core/
-│   ├── bus.py                 # pub/sub queue (already present)
-│   ├── state.py               # IDLE / LISTENING / THINKING / RESPONDING
-│   └── metrics.py             # per-turn timing log to metrics.csv
+	├── core/
+	│   ├── bus.py                 # pub/sub queue (already present)
+	│   ├── state.py               # IDLE / LISTENING / THINKING / RESPONDING
+	│   ├── metrics.py             # per-turn timing log to metrics.csv
+	│   ├── runners/
+	│   │   └── orchestrator.py    # state machine, wires bus topics to nodes
+	│   └── tools/                 # future LLM-callable tools
 │
 ├── audio/
 │   ├── audio_io.py            # sounddevice InputStream → mic frames
@@ -29,24 +33,14 @@ VoiceLLM/                      # repo root
 │   ├── aec.py                 # optional acoustic echo canceller
 │   └── wakeword.py            # (optional) soft hotword trigger
 │
-├── stt/
-│   ├── stt_node.py            # currently: VAD-segmented file-based whisper
-│   ├── stt_continuous.py      # NEW: rolling-window always-listening
-│   └── stt_two_pass.py        # NEW: fast/accurate cascade (MockingAgent style)
-│
-├── llm/
-│   ├── llm_node.py            # bus-facing node (publishes llm.token / llm.done)
-│   ├── backend_base.py        # NEW: BackendBase ABC (load, warm, stream_chat)
-│   ├── backend_llamacpp.py    # NEW: llama-cpp-python implementation
-│   └── backend_mlx.py         # NEW: mlx-lm implementation
-│
-├── tts/
-│   ├── kokoro_node.py         # streams sentences to Kokoro KPipeline,
-│   │                          #   coordinates mic-pause and barge-in
-│   └── playback.py            # (optional split) sounddevice player
-│
-├── orchestrator/
-│   └── orchestrator.py        # state machine, wires bus topics to nodes
+	├── plugins/
+	│   ├── whisper_stt/           # two-pass + continuous Whisper STT nodes
+	│   ├── kokoro_tts/            # Kokoro KPipeline playback node
+	│   ├── llama_cpp_llm/         # llama-cpp-python backend
+	│   ├── mlx_llm/               # mlx-lm backend
+	│   └── llm_core/              # shared LLM bus adapter + BackendBase
+	│
+	├── memory/                    # future persistent memory
 │
 └── docs/                      # this folder
 ```
@@ -115,7 +109,7 @@ prefix every reply with one of two tags:
 
 The orchestrator buffers the first `LLM_GATE_BUFFER_CHARS = 30` chars of
 each streaming reply in `_on_llm_token`
-([orchestrator/orchestrator.py](../orchestrator/orchestrator.py)) and
+([core/runners/orchestrator.py](../core/runners/orchestrator.py)) and
 checks for the tags:
 
 - `<ignore>` found → mark the turn `_gate_ignore = True`, discard all

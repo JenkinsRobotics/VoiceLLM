@@ -1,0 +1,1 @@
+"""Whisper STT plugin."""

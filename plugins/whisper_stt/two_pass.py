@@ -26,6 +26,7 @@ import numpy as np
 import webrtcvad
 
 import config as cfg
+from audio.chimes import ChimePlayer
 from audio.mic_stream import MicStream
 
 
@@ -245,6 +246,7 @@ class STTTwoPassNode:
         self._loop_thread: threading.Thread | None = None
         self._state = "WAKE"        # "WAKE" | "FOLLOWUP"
         self._followup_deadline = 0.0
+        self._chimes = ChimePlayer()
 
     # ── Lifecycle ──────────────────────────────────────────────────────
 
@@ -269,6 +271,17 @@ class STTTwoPassNode:
         if self.require_wake_word:
             self._state = "FOLLOWUP"
             self._followup_deadline = time.time() + self.followup_window_s
+
+    def play_chime(self, kind: str) -> None:
+        """Play a tiny UI earcon while suppressing mic capture."""
+        if not self._chimes.enabled(kind):
+            return
+        was_paused = self.mic.paused
+        self.mic.set_paused(True)
+        try:
+            self._chimes.play(kind, output_device=cfg.OUTPUT_DEVICE)
+        finally:
+            self.mic.set_paused(was_paused)
 
     # ── Wake-word matching ─────────────────────────────────────────────
 
@@ -335,6 +348,9 @@ class STTTwoPassNode:
                     command = remainder
                 else:
                     # Wake-only utterance — wait briefly for the actual command.
+                    self.play_chime("wake")
+                    with self.phrase_q.mutex:
+                        self.phrase_q.queue.clear()
                     try:
                         cmd_audio, cmd_fast = self.phrase_q.get(timeout=6.0)
                     except queue.Empty:

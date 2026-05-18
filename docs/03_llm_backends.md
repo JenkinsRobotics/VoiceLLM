@@ -37,7 +37,7 @@ MLX_PATH    = "/Users/.../mlx-community/gemma-4-26b-a4b-4bit"
 ## The interface
 
 ```python
-# llm/backend_base.py
+# plugins/llm_core/backend_base.py
 class BackendBase(abc.ABC):
     @abc.abstractmethod
     def load(self) -> None: ...
@@ -56,7 +56,7 @@ class BackendBase(abc.ABC):
     def cancel(self) -> None: ...
 ```
 
-`llm/llm_node.py` becomes thin:
+`plugins/llm_core/node.py` stays thin:
 
 ```python
 class LLMNode:
@@ -99,7 +99,7 @@ tokens correctly out of the box. We keep MLX because:
 
 ## MLX EOT (the fix that took us a while)
 
-The original [backend_mlx.py](../llm/backend_mlx.py) load tried this:
+The original [backend_mlx.py](../plugins/mlx_llm/backend.py) load tried this:
 
 ```python
 eot = getattr(self.tokenizer, "eot_token", None)
@@ -113,7 +113,7 @@ false, and Gemma's `<end_of_turn>` never got registered as a stop. The
 model ran to `LLM_MAX_TOKENS` every turn and started looping the same
 sentence. Symptom: 4-paragraph rambling replies even on simple prompts.
 
-The fix in [backend_mlx.py:stream_chat()](../llm/backend_mlx.py) is
+The fix in [backend.py:stream_chat()](../plugins/mlx_llm/backend.py) is
 backend-API-agnostic — we watch the streamed text:
 
 ```python
@@ -145,11 +145,11 @@ MAX_HISTORY_TURNS = 8        # cap rolling user/assistant pairs
 ```
 
 `clean_for_tts()` from `voice_assistant.py:265-271` (strips markdown/code
-fences/list bullets) ports over verbatim into [llm/llm_node.py](../llm/llm_node.py).
+fences/list bullets) ports over verbatim into [plugins/llm_core/node.py](../plugins/llm_core/node.py).
 
 ## History trimming
 
-[LLMNode](../llm/llm_node.py) caps conversation history at
+[LLMNode](../plugins/llm_core/node.py) caps conversation history at
 `cfg.MAX_HISTORY_TURNS` user/assistant pairs (system prompt always
 preserved). Without this, a long session grows the prompt monotonically
 and per-turn latency drifts up. Ported from

@@ -6,14 +6,14 @@ import sys
 
 import config as cfg
 from core.bus import Bus
-from llm.backend_base import BackendBase
-from llm.backend_llamacpp import LlamaCppBackend
-from llm.backend_mlx import MLXBackend
-from llm.llm_node import LLMNode
-from orchestrator.orchestrator import Orchestrator
-from stt.stt_continuous import STTContinuousNode
-from stt.stt_two_pass import STTTwoPassNode
-from tts.kokoro_node import KokoroNode
+from core.runners.orchestrator import Orchestrator
+from plugins.kokoro_tts.node import KokoroNode
+from plugins.llama_cpp_llm.backend import LlamaCppBackend
+from plugins.llm_core.backend_base import BackendBase
+from plugins.llm_core.node import LLMNode
+from plugins.mlx_llm.backend import MLXBackend
+from plugins.whisper_stt.continuous import STTContinuousNode
+from plugins.whisper_stt.two_pass import STTTwoPassNode
 
 
 def make_backend() -> BackendBase:

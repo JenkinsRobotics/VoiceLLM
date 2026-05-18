@@ -37,6 +37,7 @@ from difflib import SequenceMatcher
 import numpy as np
 
 import config as cfg
+from audio.chimes import ChimePlayer
 from audio.mic_stream import MicStream
 
 
@@ -130,6 +131,7 @@ class STTContinuousNode:
         self._last_activity = time.monotonic()
         self._current_text = ""
         self._last_committed_text = ""
+        self._chimes = ChimePlayer()
 
         # Wake-word follow-up window (only used when require_wake_word=True).
         self._followup_deadline = 0.0
@@ -159,6 +161,17 @@ class STTContinuousNode:
     def open_followup(self) -> None:
         if self.require_wake_word:
             self._followup_deadline = time.time() + self.followup_window_s
+
+    def play_chime(self, kind: str) -> None:
+        """Play a tiny UI earcon while suppressing mic capture."""
+        if not self._chimes.enabled(kind):
+            return
+        was_paused = self.mic.paused
+        self.mic.set_paused(True)
+        try:
+            self._chimes.play(kind, output_device=cfg.OUTPUT_DEVICE)
+        finally:
+            self.mic.set_paused(was_paused)
 
     # ── Wake-word matching (only used when require_wake_word=True) ─────
 

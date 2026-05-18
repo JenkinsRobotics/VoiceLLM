@@ -35,13 +35,13 @@ Demo: each script runs and produces a sensible reply.
 Goal: the proven `voice_assistant.py` flow re-expressed through the bus +
 nodes, with **MLX as the default LLM** and Gemma 4 26B-A4B-4bit.
 
-- [ ] `llm/backend_base.py` — `BackendBase` ABC.
-- [ ] `llm/backend_mlx.py` — extracted from `chat_mlx.py:39-78`.
-- [ ] `llm/backend_llamacpp.py` — extracted from `chat_llama.py:39-77`.
-- [ ] `llm/llm_node.py` — rewrite to consume a `BackendBase` instance.
-- [ ] `tts/kokoro_node.py` — replace stub synth with real `KPipeline`,
+- [ ] `plugins/llm_core/backend_base.py` — `BackendBase` ABC.
+- [ ] `plugins/mlx_llm/backend.py` — extracted from `chat_mlx.py:39-78`.
+- [ ] `plugins/llama_cpp_llm/backend.py` — extracted from `chat_llama.py:39-77`.
+- [ ] `plugins/llm_core/node.py` — rewrite to consume a `BackendBase` instance.
+- [ ] `plugins/kokoro_tts/node.py` — replace stub synth with real `KPipeline`,
       port `clean_for_tts()` and the mic-pause coordination.
-- [ ] `stt/stt_two_pass.py` — port `voice_assistant.py:127-213` (the
+- [ ] `plugins/whisper_stt/two_pass.py` — port `voice_assistant.py:127-213` (the
       VAD worker + 2-pass cascade) onto the bus.
 - [ ] `config.py` — add `LLM_BACKEND`, `MLX_PATH`, `GGUF_PATH`,
       `STT_MODE = "two_pass"`, `KOKORO_VOICE`, voice prompts.
@@ -57,10 +57,10 @@ without touching anything else.
 Goal: drop the wake word. STT transcribes constantly; any committed phrase
 becomes a turn.
 
-- [ ] `stt/stt_continuous.py` — port `always_listening_hybrid_phrase_word_pipeline.py`
+- [ ] `plugins/whisper_stt/continuous.py` — port `always_listening_hybrid_phrase_word_pipeline.py`
       onto the bus (publishes `stt.text` on each commit).
 - [ ] `config.py` flip: `STT_MODE = "continuous"`, `REQUIRE_WAKE_WORD = False`.
-- [ ] `orchestrator.py` — when `REQUIRE_WAKE_WORD = False`, every `stt.text`
+- [ ] `core/runners/orchestrator.py` — when `REQUIRE_WAKE_WORD = False`, every `stt.text`
       becomes an `llm.request`. Add cooldown so a too-quick second commit
       doesn't double-fire while we're still synthesizing the first reply.
 - [ ] Add `recent_assistant_reply` similarity filter (Layer C in

@@ -20,7 +20,7 @@ AEC reference) needs a real fanout.
 
 ## 2. History ownership ✅ RESOLVED
 
-Lives in the LLM node ([llm/llm_node.py](../llm/llm_node.py)). The
+Lives in the LLM node ([plugins/llm_core/node.py](../plugins/llm_core/node.py)). The
 orchestrator reads via `node.history_snapshot()` for the self-speech
 similarity filter. History is also capped at `MAX_HISTORY_TURNS = 8`
 user/assistant pairs. Closed.

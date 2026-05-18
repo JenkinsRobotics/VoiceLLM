@@ -1,0 +1,12 @@
+name: kokoro_tts
+kind: plugin
+description: Kokoro text-to-speech synthesis and sounddevice playback.
+claims:
+  hardware: [speaker]
+uses:
+  libraries: [kokoro, sounddevice]
+  models: [kokoro_voice_files]
+provides:
+  bus_topics: [mic.pause, tts.audio_chunk, tts.done]
+entrypoints:
+  node: plugins.kokoro_tts.node:KokoroNode

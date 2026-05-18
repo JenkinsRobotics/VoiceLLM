@@ -152,9 +152,30 @@ TTS_SAMPLE_RATE = 24000
 TTS_MIN_CHARS = 240     # fallback for long text without sentence/paragraph breaks
 TTS_TAIL_SLEEP_S = 0.12 # let speakers drain before un-pausing mic
 
+# ── Earcons / chimes ─────────────────────────────────────────────────
+# Ported from voice_assistant.py: the short chime acknowledges a wake-only
+# utterance, and the double chime says the assistant is ready for follow-up.
+CHIMES_ENABLED = True
+WAKE_CHIME_ENABLED = True
+FOLLOWUP_CHIME_ENABLED = True
+CHIME_SAMPLE_RATE = 24000
+CHIME_VOLUME = 0.25
+WAKE_CHIME_FREQ = 880.0
+WAKE_CHIME_DURATION_MS = 110
+FOLLOWUP_CHIME_LOW_FREQ = 660.0
+FOLLOWUP_CHIME_HIGH_FREQ = 880.0
+FOLLOWUP_CHIME_DURATION_MS = 80
+FOLLOWUP_CHIME_GAP_MS = 50
+
 # ── Behavior flags (M2 defaults; M3+M4 flip these) ─────────────────────
 BARGE_IN_ENABLED = False  # M4
 AEC_ENABLED = False       # M4
+
+# M4 voice_chat.py reference values. These are preserved here so the full-duplex
+# path can be wired without re-reading the scratch reference.
+AEC_FRAME_MS = 10
+AEC_FILTER_LENGTH = 3200
+BARGE_IN_MS = 200
 
 # ── Debug ──────────────────────────────────────────────────────────────
 AUDIO_DEBUG = False

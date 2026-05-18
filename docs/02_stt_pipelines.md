@@ -28,8 +28,8 @@ The reference files:
 ## Default for VoiceLLM v1
 
 **Shipped status:**
-- ✅ `stt/stt_two_pass.py` — VAD two-pass, default for `STT_MODE = "two_pass"`.
-- ✅ `stt/stt_continuous.py` — hybrid phrase/word, opt-in via `STT_MODE = "continuous"` (M3.5).
+- ✅ `plugins/whisper_stt/two_pass.py` — VAD two-pass, default for `STT_MODE = "two_pass"`.
+- ✅ `plugins/whisper_stt/continuous.py` — hybrid phrase/word, opt-in via `STT_MODE = "continuous"` (M3.5).
 
 The default stays `"two_pass"` because it's the proven baseline and the
 M3 quick path runs cleanly on top of it (orchestrator self-speech filter +
@@ -38,7 +38,7 @@ to `"continuous"` when you want lower-latency phrase commit on short
 utterances; revert via the same single line if anything regresses.
 
 Other strategies (phrase buffer, word cursor, human-style overlapping
-memory) remain unported. They can each become a `stt/*.py` node with the
+memory) remain unported. They can each become a `plugins/whisper_stt/*.py` node with the
 same interface (`start`/`stop`/`set_paused`/`open_followup`,
 publishes `stt.text`) if a future need surfaces.
 
