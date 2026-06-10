@@ -37,7 +37,7 @@ bus.publish("mic.pause", False)
 When we *want* barge-in, the mic has to stay open while we speak, so
 mic-pause is wrong. We need to subtract our own audio from the mic stream.
 The scaffold is already there in `audio/aec.py`; the runner that will wire it
-for M4 is `core/runners/orchestrator.py`:
+for M4 is `agent/orchestrator.py`:
 
 ```python
 self.aec = AECWrapper(sample_rate=SAMPLE_RATE, frame_ms=10)
@@ -62,7 +62,7 @@ if SequenceMatcher(None, recent_assistant_reply, candidate_text).ratio() > 0.75:
 ```
 
 We already have `recent_assistant_reply` in the LLM history.
-**Implemented** in [core/runners/orchestrator.py:_sounds_like_self](../core/runners/orchestrator.py)
+**Implemented** in [agent/orchestrator.py:_sounds_like_self](../agent/orchestrator.py)
 with `SELF_SPEECH_SIMILARITY_THRESHOLD = 0.75`.
 
 ### Layer D — LLM gate (the catch-all)
