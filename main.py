@@ -47,6 +47,10 @@ def make_stt(bus: Bus):
             silence_hangover_ms=cfg.SILENCE_HANGOVER_MS,
             min_speech_ms=cfg.MIN_SPEECH_MS,
             max_speech_ms=cfg.MAX_SPEECH_MS,
+            short_phrase_max_ms=getattr(cfg, "SHORT_PHRASE_MAX_MS", 0),
+            short_phrase_hangover_ms=getattr(
+                cfg, "SHORT_PHRASE_HANGOVER_MS", 0
+            ),
             input_device=cfg.INPUT_DEVICE,
         )
     if cfg.STT_MODE == "continuous":

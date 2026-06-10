@@ -134,9 +134,21 @@ VAD_AGGRESSIVENESS = 2
 
 PRE_ROLL_MS = 240
 POST_PADDING_MS = 250
-SILENCE_HANGOVER_MS = 1000
+# Trailing-silence required to commit an utterance.  Tuned 2026-06-10
+# from 1000 → 600 ms after operator feedback that short phrases
+# ("yes please", "is that it") felt sluggish.  600 ms is still safe
+# for normal speech with mid-sentence pauses; raise back if you hit
+# false commits in casual conversation.
+SILENCE_HANGOVER_MS = 600
 MIN_SPEECH_MS = 400
 MAX_SPEECH_MS = 12000
+
+# Short-phrase early commit.  When the speech run is shorter than
+# this and trailing silence reaches ``SHORT_PHRASE_HANGOVER_MS``,
+# commit immediately rather than wait the full SILENCE_HANGOVER_MS.
+# Keeps quick answers ("yes", "no", "good night") snappy.
+SHORT_PHRASE_MAX_MS = 1500
+SHORT_PHRASE_HANGOVER_MS = 350
 
 INPUT_DEVICE = None   # None = system default; index or name string also OK
 OUTPUT_DEVICE = None

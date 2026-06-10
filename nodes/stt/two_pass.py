@@ -48,6 +48,13 @@ class _VadWorker(threading.Thread):
         silence_hangover_ms: int,
         min_speech_ms: int,
         max_speech_ms: int,
+        # Short-phrase early commit (operator feedback 2026-06-10):
+        # quick utterances like "yes please" / "good night" felt
+        # sluggish under the full silence_hangover_ms wait.  When
+        # speech run is shorter than ``short_phrase_max_ms``, commit
+        # after only ``short_phrase_hangover_ms`` of silence.
+        short_phrase_max_ms: int = 0,
+        short_phrase_hangover_ms: int = 0,
     ) -> None:
         super().__init__(daemon=True)
         self.mic = mic
@@ -63,6 +70,14 @@ class _VadWorker(threading.Thread):
         self.max_speech_blocks = max(self.min_speech_blocks, max_speech_ms // frame_ms)
         self.pre_roll_blocks = max(0, pre_roll_ms // frame_ms)
         self.post_pad_samples = int(sample_rate * post_padding_ms / 1000)
+        # 0 disables the short-phrase early-commit path.
+        self.short_phrase_max_blocks = (
+            short_phrase_max_ms // frame_ms if short_phrase_max_ms > 0 else 0
+        )
+        self.short_phrase_silence_blocks = (
+            max(1, short_phrase_hangover_ms // frame_ms)
+            if short_phrase_hangover_ms > 0 else self.silence_blocks_to_end
+        )
 
         # Exposed so the main loop can avoid expiring the follow-up window
         # while the user is still mid-sentence.
@@ -119,11 +134,26 @@ class _VadWorker(threading.Thread):
 
             self.in_speech = in_speech and speech_blocks >= self.min_speech_blocks
 
+            # Adaptive end-of-phrase detection:
+            #   - Short phrases (e.g. "yes please", "good night")
+            #     commit after a shorter trailing silence so quick
+            #     answers feel snappy.
+            #   - Longer phrases still get the full hangover to
+            #     absorb mid-sentence pauses.
+            is_short_phrase = (
+                self.short_phrase_max_blocks > 0
+                and speech_blocks <= self.short_phrase_max_blocks
+            )
+            required_silence_blocks = (
+                self.short_phrase_silence_blocks
+                if is_short_phrase
+                else self.silence_blocks_to_end
+            )
             phrase_done = (
                 in_speech
                 and speech_blocks >= self.min_speech_blocks
                 and (
-                    silent_blocks >= self.silence_blocks_to_end
+                    silent_blocks >= required_silence_blocks
                     or speech_blocks >= self.max_speech_blocks
                 )
             )
@@ -181,6 +211,8 @@ class STTTwoPassNode:
         silence_hangover_ms: int,
         min_speech_ms: int,
         max_speech_ms: int,
+        short_phrase_max_ms: int = 0,
+        short_phrase_hangover_ms: int = 0,
         input_device=None,
     ) -> None:
         from pywhispercpp.model import Model as STTModel
@@ -241,6 +273,8 @@ class STTTwoPassNode:
             silence_hangover_ms=silence_hangover_ms,
             min_speech_ms=min_speech_ms,
             max_speech_ms=max_speech_ms,
+            short_phrase_max_ms=short_phrase_max_ms,
+            short_phrase_hangover_ms=short_phrase_hangover_ms,
         )
 
         self._loop_thread: threading.Thread | None = None

@@ -79,6 +79,12 @@ class Orchestrator:
         self._gate_ignore: bool = False
         self._tts_stream_buffer: str = ""
 
+        # Operator feedback 2026-06-10: when the user says "good night"
+        # / "bye" / "talk to you later", the followup window + chime
+        # shouldn't fire — the conversation has ended.  Stash the
+        # decision at LLM-done time so _on_tts_done can act on it.
+        self._end_of_conversation: bool = False
+
         # M3: optional eval log for offline review.
         self._eval_log_path: Path | None = (
             Path(cfg.M3_EVAL_LOG) if cfg.M3_EVAL_LOG else None
@@ -313,6 +319,14 @@ class Orchestrator:
     def _on_llm_done(self, reply: str) -> None:
         if self.cur:
             self.cur.llm_done_ts = now()
+            # Detect end-of-conversation intent.  We require BOTH
+            # sides to mirror — the user said a farewell AND the
+            # agent acknowledged with one — so a stray "good night"
+            # in the middle of a story doesn't close the loop.
+            user_said_bye = _is_farewell(self.cur.stt_text or "")
+            agent_said_bye = _is_farewell(reply or "")
+            if user_said_bye and agent_said_bye:
+                self._end_of_conversation = True
 
         # Edge case: gate never decided because the LLM produced fewer than
         # LLM_GATE_BUFFER_CHARS total. Treat the buffer as the reply.
@@ -352,12 +366,22 @@ class Orchestrator:
 
     def _on_tts_done(self) -> None:
         was_ignored = self._gate_ignore
+        end_of_conv = self._end_of_conversation
+        self._end_of_conversation = False  # reset for next turn
         if self.cur:
             self.cur.tts_end_ts = now()
             self.metrics.write(self.cur)
             self.cur = None
         self.state.set(SysState.IDLE)
-        if not was_ignored:
+        if end_of_conv:
+            print("[end-of-conversation — followup window suppressed]",
+                  flush=True)
+            self._log_eval("", "end_of_conversation")
+            # Skip chime + open_followup.  Conversation is over;
+            # ambient noise should not be solicited for a reply.
+            # STT is still always-on; next time the user actually
+            # speaks, the normal flow resumes.
+        elif not was_ignored:
             self._active_conversation_deadline = (
                 time.time() + cfg.ACTIVE_CONVERSATION_TIMEOUT_S
             )
@@ -366,7 +390,8 @@ class Orchestrator:
                 play_chime("followup")
         # Open a wake-word-free follow-up window for the next utterance.
         # (No-op when REQUIRE_WAKE_WORD = False — STT is already always-on.)
-        self.stt.open_followup()
+        if not end_of_conv:
+            self.stt.open_followup()
 
         # M3: drain the pending-turn slot if something arrived mid-turn.
         if self._pending_text is not None:
@@ -380,3 +405,49 @@ class Orchestrator:
             else:
                 print(f"[pending dropped age={age:.2f}s] {text!r}", flush=True)
                 self._log_eval(text, "pending_stale", age=age)
+
+
+# ── farewell detection (operator feedback 2026-06-10) ───────────────
+#
+# A small phrase matcher used by _on_llm_done to decide whether the
+# current turn ends the conversation.  When BOTH the user and the
+# agent reply contain a farewell phrase, _on_tts_done skips the
+# followup chime + window — ambient noise after "Good night" should
+# not be solicited for a follow-up.
+#
+# Conservative on purpose: matches whole-word boundaries, common
+# spellings.  Falsely matching inside a long unrelated reply is
+# fine because we require BOTH sides to confirm.
+
+import re as _re
+
+_FAREWELL_PATTERNS = [
+    _re.compile(p, _re.IGNORECASE) for p in (
+        r"\bgood\s*night\b",
+        r"\bg\s?night\b",
+        r"\bgoodbye\b",
+        r"\bgood\s*bye\b",
+        r"\bbye\b",
+        r"\bbye[\s-]*bye\b",
+        r"\bsee\s*you\s*(later|tomorrow|soon|then)\b",
+        r"\bsee\s*ya\b",
+        r"\bcatch\s*you\s*later\b",
+        r"\btalk\s*(to\s*you|to\s*ya)?\s*later\b",
+        r"\bttyl\b",
+        r"\bsleep\s*well\b",
+        r"\bhave\s*a\s*(good|nice|great)\s*(day|night|evening|one|weekend)\b",
+        r"\bfarewell\b",
+        r"\btake\s*care\b",
+        r"\buntil\s*next\s*time\b",
+        r"\bsigning\s*off\b",
+    )
+]
+
+
+def _is_farewell(text: str) -> bool:
+    if not text:
+        return False
+    for pat in _FAREWELL_PATTERNS:
+        if pat.search(text):
+            return True
+    return False
