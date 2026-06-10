@@ -67,7 +67,7 @@ becomes a turn.
       `05_barge_in_and_self_speech.md`).
 
 Demo: speak naturally, get a reply, keep talking, get another reply, no
-"hey jaeger" needed. Background TV doesn't trigger the LLM (verified by
+"hey eve" needed. Background TV doesn't trigger the LLM (verified by
 running it alongside a YouTube video for 5 minutes — `outputs/` log).
 
 ## M4 — Barge-in

@@ -63,7 +63,7 @@ explicitly revived.
 cd VoiceLLM
 python main.py
 # REQUIRE_WAKE_WORD=False is the default — just talk.
-# Flip back to True in config.py for the wake-word "okay jaeger" flow.
+# Flip back to True in config.py for the wake-word "okay eve" flow.
 ```
 
 This reproduces [references/voice_assistant.py](../references/voice_assistant.py)'s

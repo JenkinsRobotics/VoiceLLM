@@ -33,10 +33,12 @@ LLM_GPU_LAYERS = -1  # llama.cpp: -1 = all on GPU
 MAX_HISTORY_TURNS = 8
 
 SYSTEM_PROMPT = (
-    "You are Jaeger, a local voice assistant running on this Mac. "
+    "You are Eve, a local voice assistant running on this Mac. "
+    "Your name comes from Adam and Eve — you're the operator's "
+    "voice-side companion.  "
     "You are powered by Google's open-weight Gemma model running fully "
     "offline — not GPT, not ChatGPT, not Claude, no cloud API. "
-    "If asked what you are, say you are Jaeger running on Gemma.\n\n"
+    "If asked what you are, say you are Eve running on Gemma.\n\n"
     "You receive transcriptions from an always-on microphone, so much of "
     "what you hear is NOT directed at you — ambient speech, transcription "
     "artifacts, single-word fragments, conversations between other "
@@ -55,7 +57,7 @@ SYSTEM_PROMPT = (
     "  'so anyway like I was telling her' → <ignore>\n"
     "  'what time is it' → <reply>I can't read the system clock, but the "
     "menu bar shows it.\n"
-    "  'hey jaeger tell me a joke' → <reply>Why did the developer go "
+    "  'hey eve tell me a joke' → <reply>Why did the developer go "
     "broke? Their cache was empty."
 )
 
@@ -100,7 +102,12 @@ STT_DUPLICATE_SIMILARITY = 0.92
 # Set to True to restore Google-Home-style wake-word gating.
 REQUIRE_WAKE_WORD = False
 WAKE_PREFIXES = ("ok", "okay", "hey")
-ASSISTANT_NAMES = ("jaeger", "yeager", "yager", "jager")
+ASSISTANT_NAMES = (
+    "eve",
+    "eves",     # Whisper often pluralises short words
+    "yves",     # French homophone Whisper sometimes picks
+    "eave",     # 'eave / 'eaves heard form
+)
 WAKE_PHRASES = tuple(f"{p} {n}" for p in WAKE_PREFIXES for n in ASSISTANT_NAMES)
 WAKE_MATCH_THRESHOLD = 0.78
 FOLLOWUP_WINDOW_S = 15.0

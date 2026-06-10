@@ -114,7 +114,7 @@ All tunables live in [config.py](config.py). The flags you'll touch most:
 |---|---|---|
 | `LLM_BACKEND` | `"llamacpp"` | `"llamacpp"` (proven) or `"mlx"` (faster on M-series) |
 | `STT_MODE` | `"two_pass"` | `"two_pass"` (default) or `"continuous"` (M3.5 rolling) |
-| `REQUIRE_WAKE_WORD` | `False` | `True` reverts to "okay jaeger" gating |
+| `REQUIRE_WAKE_WORD` | `False` | `True` reverts to "okay eve" gating |
 | `LLM_TEMPERATURE` | `0.6` | LLM sampling temperature |
 | `MAX_HISTORY_TURNS` | `8` | rolling user/assistant pair cap |
 | `KOKORO_VOICE` | `"af_heart"` | Kokoro voice id |

@@ -8,14 +8,14 @@ fully local on Apple Silicon.
 ## What is different from MockingAgent
 
 MockingAgent is the proven Google-Home-style baseline:
-- wake word required ("ok jaeger"),
+- wake word required ("ok eve"),
 - 2-pass STT (fast for wake match, accurate for the command),
 - short follow-up window after a reply,
 - mic paused while TTS speaks (self-speech rejection).
 
 VoiceLLM keeps the proven plumbing but changes the *behavior model*:
 - **continuous hearing**: every committed phrase becomes a turn — no
-  "okay jaeger" between turns. (M3 — shipped.)
+  "okay eve" between turns. (M3 — shipped.)
 - **LLM-gated speech**: every reply begins with `<ignore>` or `<reply>`;
   the orchestrator suppresses TTS when the LLM judges the input wasn't
   addressed to it (TV, keystrokes, hallucinated transcriptions, ambient
