@@ -24,7 +24,7 @@ and the LLM stream so we sound responsive instead of typed-and-read-back.
 4. **Optional AEC.** Even with mic-pause, if the user wants to barge in we
    need to be hearing while speaking. Feed the synthesized audio chunks as
    the AEC reference signal (the existing `AECWrapper` in
-   `audio/aec.py` already accepts a far-end stream).
+   `nodes/audio_session/aec.py` already accepts a far-end stream).
 
 ## The node
 
@@ -76,7 +76,7 @@ class KokoroNode:
         self.cancel_event.clear()
 ```
 
-That's a sketch — the real version lives in `plugins/kokoro_tts/node.py`.
+That's a sketch — the real version lives in `nodes/tts/node.py`.
 
 ## Voice and language
 
@@ -95,7 +95,7 @@ extra downloads.
 
 Match the LLM stream cadence — fire on the first sentence end *or* after
 ~60 chars without one (so a long sentence doesn't stall). The regex from
-the existing `plugins/kokoro_tts/node.py` heuristic is fine; loosen the trailing
+the existing `nodes/tts/node.py` heuristic is fine; loosen the trailing
 whitespace requirement so we catch end-of-stream punctuation:
 
 ```python

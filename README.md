@@ -48,7 +48,7 @@ offline.
 | TTS | `kokoro` (`KPipeline`) |
 
 State and routing run through a single in-process pub/sub `Bus` consumed by
-the runner in [core/runners/orchestrator.py](core/runners/orchestrator.py)
+the runner in [agent/orchestrator.py](agent/orchestrator.py)
 (`IDLE → THINKING → RESPONDING → IDLE`).
 
 ## Current status
@@ -128,27 +128,45 @@ timeouts, energy thresholds, etc.).
 ```
 VoiceLLM/
 ├── config.py                  # all tunables
-├── main.py                    # build bus + nodes, start orchestrator
-├── core/                      # bus, state, metrics, runners, future tools
-│   ├── runners/               # framework-owned loops (orchestrator)
-│   └── tools/                 # future LLM-callable tools
-├── audio/                     # MicStream, VAD, AEC (M4)
-├── plugins/                   # STT, TTS, and LLM integrations
-│   ├── whisper_stt/           # two_pass.py, continuous.py
-│   ├── kokoro_tts/            # Kokoro playback node
-│   ├── llama_cpp_llm/         # GGUF backend
-│   ├── mlx_llm/               # MLX backend
-│   └── llm_core/              # shared LLM bus adapter/base class
-├── memory/                    # future persistent memory
+├── main.py                    # wire bus + nodes, start orchestrator
+│
+├── agent/                     # THE CONSCIOUS SIDE — LLM + orchestrator
+│   ├── orchestrator.py        # STT → LLM → TTS state machine
+│   ├── llm/                   # LLM bus node + BackendBase
+│   │   ├── node.py
+│   │   └── backend_base.py
+│   └── adapters/              # model backends (selected via config.LLM_BACKEND)
+│       ├── llama_cpp/         # GGUF backend
+│       └── mlx/               # Apple-Silicon-native MLX backend
+│
+├── nodes/                     # PERIPHERAL NODES — STT, TTS, mic
+│   ├── audio_session/         # MicStream + VAD + AEC + chimes
+│   ├── stt/                   # whisper.cpp continuous + two_pass
+│   └── tts/                   # Kokoro playback node
+│
+├── transport/                 # the bus — pub/sub between agent + nodes
+│   └── bus.py
+│
+├── core/                      # SHARED INFRASTRUCTURE
+│   ├── state.py               # process state
+│   └── metrics.py             # per-turn timing
+│
+├── ASSETS/                    # chimes, packaged audio
 ├── references/                # pasted historical scripts, not imported
 ├── docs/                      # architecture / milestones / status
 ├── outputs/                   # m3_eval.jsonl (runtime decision log)
 └── metrics.csv                # per-turn timing log
 ```
 
-Vocabulary-wise: STT/TTS/LLM are **plugins**, the orchestrator is a
-framework-owned **runner**, `core/bus.py` is transport infrastructure, and
-`core/tools/` is intentionally empty until VoiceLLM grows model-callable tools.
+Vocabulary-wise (aligned with JROS 0.5):
+
+- `agent/` is the **cognitive side** — the LLM and its orchestration loop.
+- `nodes/` is the **peripheral side** — STT, TTS, mic + AEC.
+- `transport/` is the **bus** connecting them.
+- `core/` is what both sides share (state, metrics).
+
+The split mirrors JROS exactly so lessons here merge cleanly into the
+full framework.
 
 ## Documentation
 

@@ -35,7 +35,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 import config as cfg
-from core.bus import Bus
+from transport.bus import Bus
 from core.metrics import MetricsLog, TurnMetrics, now
 from core.state import State, SysState
 

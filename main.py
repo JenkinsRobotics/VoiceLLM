@@ -5,15 +5,15 @@ from __future__ import annotations
 import sys
 
 import config as cfg
-from core.bus import Bus
-from core.runners.orchestrator import Orchestrator
-from plugins.kokoro_tts.node import KokoroNode
-from plugins.llama_cpp_llm.backend import LlamaCppBackend
-from plugins.llm_core.backend_base import BackendBase
-from plugins.llm_core.node import LLMNode
-from plugins.mlx_llm.backend import MLXBackend
-from plugins.whisper_stt.continuous import STTContinuousNode
-from plugins.whisper_stt.two_pass import STTTwoPassNode
+from transport.bus import Bus
+from agent.orchestrator import Orchestrator
+from nodes.tts.node import KokoroNode
+from agent.adapters.llama_cpp.backend import LlamaCppBackend
+from agent.llm.backend_base import BackendBase
+from agent.llm.node import LLMNode
+from agent.adapters.mlx.backend import MLXBackend
+from nodes.stt.continuous import STTContinuousNode
+from nodes.stt.two_pass import STTTwoPassNode
 
 
 def make_backend() -> BackendBase:

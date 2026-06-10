@@ -47,14 +47,14 @@ VoiceLLM has a tool surface.
 
 Current production plugins:
 
-- `plugins/kokoro_tts/` — Kokoro speech synthesis and playback
-- `plugins/whisper_stt/` — two-pass and continuous pywhispercpp STT
-- `plugins/llama_cpp_llm/` — llama-cpp-python GGUF backend
-- `plugins/mlx_llm/` — Apple MLX backend
+- `nodes/tts/` — Kokoro speech synthesis and playback
+- `nodes/stt/` — two-pass and continuous pywhispercpp STT
+- `agent/adapters/llama_cpp/` — llama-cpp-python GGUF backend
+- `agent/adapters/mlx/` — Apple MLX backend
 - future full-duplex audio/AEC -> `plugins/coreaudio_duplex/` or
   `plugins/speex_aec/`
 
-`plugins/llm_core/` is shared LLM adapter code used by the LLM plugins. It is
+`agent/llm/` is shared LLM adapter code used by the LLM plugins. It is
 kept under `plugins/` because it exists to support plugin backends, but it is
 not itself an external integration.
 
@@ -64,12 +64,12 @@ Framework-owned background work that the model does not call directly.
 
 Current examples:
 
-- The orchestrator loop in `core/runners/orchestrator.py`
-- TTS synth/play threads inside `plugins/kokoro_tts/node.py`
-- STT capture/transcription loops inside `plugins/whisper_stt/`
+- The orchestrator loop in `agent/orchestrator.py`
+- TTS synth/play threads inside `nodes/tts/node.py`
+- STT capture/transcription loops inside `nodes/stt/`
 
 If runners become reusable framework infrastructure, place them under
-`core/runners/`.
+`agent/orchestrator.py`.
 
 ## Infrastructure Terms
 

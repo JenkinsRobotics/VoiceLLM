@@ -8,12 +8,12 @@ from tempfile import TemporaryDirectory
 from typing import Iterator
 
 import config as cfg
-from core.bus import Bus
+from transport.bus import Bus
 from core.metrics import MetricsLog
-from core.runners.orchestrator import Orchestrator
+from agent.orchestrator import Orchestrator
 from core.state import SysState
-from plugins.llm_core.backend_base import BackendBase
-from plugins.llm_core.node import LLMNode, clean_for_tts
+from agent.llm.backend_base import BackendBase
+from agent.llm.node import LLMNode, clean_for_tts
 
 
 class FakeBackend(BackendBase):

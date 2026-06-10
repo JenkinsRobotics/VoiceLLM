@@ -37,8 +37,8 @@ from difflib import SequenceMatcher
 import numpy as np
 
 import config as cfg
-from audio.chimes import ChimePlayer
-from audio.mic_stream import MicStream
+from nodes.audio_session.chimes import ChimePlayer
+from nodes.audio_session.mic_stream import MicStream
 
 
 def _normalize(text: str) -> str:

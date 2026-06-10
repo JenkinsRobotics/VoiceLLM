@@ -5,7 +5,7 @@ how much of the codebase the answer changes.
 
 ## 1. Bus pattern: poll vs. subscribe
 
-`core/bus.py` currently exposes `get(timeout)` — single-consumer polling.
+`transport/bus.py` currently exposes `get(timeout)` — single-consumer polling.
 The orchestrator owns the only consumer thread. Multiple nodes wanting to
 react to the same topic (e.g. `tts.audio_chunk` going to playback *and*
 AEC reference) needs a real fanout.

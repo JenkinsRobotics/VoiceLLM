@@ -109,7 +109,7 @@ prefix every reply with one of two tags:
 
 The orchestrator buffers the first `LLM_GATE_BUFFER_CHARS = 30` chars of
 each streaming reply in `_on_llm_token`
-([core/runners/orchestrator.py](../core/runners/orchestrator.py)) and
+([agent/orchestrator.py](../agent/orchestrator.py)) and
 checks for the tags:
 
 - `<ignore>` found → mark the turn `_gate_ignore = True`, discard all
