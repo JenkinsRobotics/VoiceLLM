@@ -63,6 +63,12 @@ class KokoroNode:
         self.bus = bus
         self.voice = voice
         self.sr = sr
+        # Optional direct mic-pause callable (set by main.py). The bus
+        # round-trip lands only after the orchestrator's next dispatch,
+        # during which the first TTS samples can leak into STT — this
+        # pauses synchronously; the bus message still follows for the
+        # orchestrator's metrics.
+        self.pause_mic = None
         # Older config used 60 chars, which can fire mid-sentence. Keep the
         # public knob, but only allow it to raise the fallback threshold.
         self.min_chars = max(min_chars, _FALLBACK_MIN_CHARS)
@@ -96,6 +102,14 @@ class KokoroNode:
         sd.stop()
 
     # ── Internals ──────────────────────────────────────────────────────
+
+    def _set_mic_paused(self, paused: bool) -> None:
+        if self.pause_mic is not None:
+            try:
+                self.pause_mic(paused)
+            except Exception as exc:
+                print(f"[tts] mic pause failed: {exc}", flush=True)
+        self.bus.publish("mic.pause", paused)
 
     def _pop_sentence(self, buf: str, *, force: bool) -> tuple[str, str]:
         """Return (text, remaining_buf); text='' if nothing to pop yet."""
@@ -183,7 +197,7 @@ class KokoroNode:
                 # Stream-end sentinel.
                 if speaking:
                     time.sleep(self.tail_sleep_s)
-                    self.bus.publish("mic.pause", False)
+                    self._set_mic_paused(False)
                     speaking = False
                 self.bus.publish("tts.done", None)
                 continue
@@ -191,13 +205,13 @@ class KokoroNode:
             if self._cancelled.is_set():
                 # Drain any backlog without playing it.
                 if self.audio_q.empty() and speaking:
-                    self.bus.publish("mic.pause", False)
+                    self._set_mic_paused(False)
                     self.bus.publish("tts.done", None)
                     speaking = False
                 continue
 
             if not speaking:
-                self.bus.publish("mic.pause", True)
+                self._set_mic_paused(True)
                 speaking = True
 
             # Make the played audio available to AEC / similarity-filter

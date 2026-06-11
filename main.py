@@ -107,6 +107,11 @@ def main() -> int:
     # STT last — once it starts, the mic is open.
     stt = make_stt(bus)
 
+    # Pause the mic synchronously when TTS starts playing — the mic.pause
+    # bus message only lands after the orchestrator's next dispatch, by
+    # which time the first TTS samples are already in the air.
+    tts.pause_mic = stt.set_paused
+
     if cfg.REQUIRE_WAKE_WORD:
         print(f"[ready] say one of: {', '.join(cfg.WAKE_PHRASES)}", flush=True)
 
