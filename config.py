@@ -225,3 +225,42 @@ BARGE_IN_MS = 200
 # ── Debug ──────────────────────────────────────────────────────────────
 AUDIO_DEBUG = False
 PRINT_LLM_TIMING = True
+
+
+# ── Validation ─────────────────────────────────────────────────────────
+# Guard the invalid combos that otherwise fail at runtime (or worse,
+# silently invert a feature). Runs at import.
+def _validate() -> None:
+    problems: list[str] = []
+    if FRAME_MS not in (10, 20, 30):
+        problems.append(
+            f"FRAME_MS={FRAME_MS}: webrtcvad only accepts 10/20/30 ms frames"
+        )
+    if SAMPLE_RATE not in (8000, 16000, 32000, 48000):
+        problems.append(
+            f"SAMPLE_RATE={SAMPLE_RATE}: webrtcvad only accepts 8/16/32/48 kHz"
+        )
+    if SHORT_PHRASE_HANGOVER_MS > SILENCE_HANGOVER_MS:
+        problems.append(
+            "SHORT_PHRASE_HANGOVER_MS > SILENCE_HANGOVER_MS inverts the "
+            "short-phrase early commit (short phrases would wait LONGER)"
+        )
+    if LLM_MAX_TOKENS >= LLM_CTX:
+        problems.append("LLM_MAX_TOKENS must be well below LLM_CTX")
+    if LLM_BACKEND not in ("mlx", "llamacpp"):
+        problems.append(f"Unknown LLM_BACKEND: {LLM_BACKEND!r}")
+    if STT_MODE not in ("two_pass", "continuous"):
+        problems.append(f"Unknown STT_MODE: {STT_MODE!r}")
+    if problems:
+        raise ValueError("config.py:\n  " + "\n  ".join(problems))
+    if TTS_MIN_CHARS < 240:
+        # KokoroNode clamps to 240 to avoid mid-sentence synth; warn so the
+        # knob doesn't silently lie.
+        print(
+            f"[config] TTS_MIN_CHARS={TTS_MIN_CHARS} is below the node's "
+            "240-char floor and will be clamped",
+            flush=True,
+        )
+
+
+_validate()
