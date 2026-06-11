@@ -85,6 +85,10 @@ class Orchestrator:
         # decision at LLM-done time so _on_tts_done can act on it.
         self._end_of_conversation: bool = False
 
+        # Set by ``llm.error`` so _on_llm_done can speak a fallback
+        # instead of ending the turn in confusing silence.
+        self._llm_errored: bool = False
+
         # M3: optional eval log for offline review.
         self._eval_log_path: Path | None = (
             Path(cfg.M3_EVAL_LOG) if cfg.M3_EVAL_LOG else None
@@ -119,6 +123,9 @@ class Orchestrator:
             self._on_stt_text(payload)
         elif topic == "llm.token":
             self._on_llm_token(payload)
+        elif topic == "llm.error":
+            self._llm_errored = True
+            print(f"[llm.error] {payload}", flush=True)
         elif topic == "llm.done":
             self._on_llm_done(payload)
         elif topic == "tts.done":
@@ -175,6 +182,7 @@ class Orchestrator:
         self._gate_decided = False
         self._gate_ignore = False
         self._tts_stream_buffer = ""
+        self._llm_errored = False
         self.state.set(SysState.THINKING)
 
         print(f"[think]  {text!r}", flush=True)
@@ -317,6 +325,21 @@ class Orchestrator:
         return ""
 
     def _on_llm_done(self, reply: str) -> None:
+        if self._llm_errored:
+            # Backend failed with no usable output (LLMNode already rolled
+            # the user message back). Speak a short fallback — silence here
+            # reads as "Eve is broken" with no way to tell why.
+            self._llm_errored = False
+            if self.cur:
+                self.cur.llm_done_ts = now()
+            self._gate_decided = True
+            self._gate_ignore = False
+            self._tts_stream_buffer = ""
+            self._log_eval(self.cur.stt_text if self.cur else "", "llm_error")
+            self.tts.feed_text("Sorry, my language model hit an error on that one.")
+            self.tts.flush()
+            return
+
         if self.cur:
             self.cur.llm_done_ts = now()
             # Detect end-of-conversation intent.  We require BOTH
@@ -357,6 +380,11 @@ class Orchestrator:
             self.llm.discard_last_turn()
             self._on_tts_done()
             return
+
+        if not reply:
+            # Model produced nothing usable (e.g. a bare "<reply>") —
+            # drop the empty pair so it doesn't pollute history.
+            self.llm.discard_last_turn()
 
         # Synthesize whatever tail is still buffered in TTS.
         self._flush_tts_stream_buffer()

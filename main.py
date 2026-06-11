@@ -89,6 +89,7 @@ def main() -> int:
         temperature=cfg.LLM_TEMPERATURE,
         top_p=cfg.LLM_TOP_P,
         max_history_turns=cfg.MAX_HISTORY_TURNS,
+        ctx_limit=cfg.LLM_CTX,
     )
     llm.load_and_warm()
 
