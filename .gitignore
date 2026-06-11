@@ -40,3 +40,4 @@ dist/
 # regenerated every run. Don't track to keep diffs clean.
 metrics.csv
 outputs/
+metrics.csv.old
