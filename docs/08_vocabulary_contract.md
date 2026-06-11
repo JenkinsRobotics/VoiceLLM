@@ -54,9 +54,9 @@ Current production plugins:
 - future full-duplex audio/AEC -> `plugins/coreaudio_duplex/` or
   `plugins/speex_aec/`
 
-`agent/llm/` is shared LLM adapter code used by the LLM plugins. It is
-kept under `plugins/` because it exists to support plugin backends, but it is
-not itself an external integration.
+`agent/llm/` is shared LLM adapter code used by the LLM plugins. It lives
+in the cognitive layer because it exists to support backend adapters, but
+it is not itself an external integration.
 
 ### Runner
 
@@ -68,8 +68,8 @@ Current examples:
 - TTS synth/play threads inside `nodes/tts/node.py`
 - STT capture/transcription loops inside `nodes/stt/`
 
-If runners become reusable framework infrastructure, place them under
-`agent/orchestrator.py`.
+If runners become reusable framework infrastructure, keep them in the
+layer that owns them (`agent/` for cognition, `nodes/` for I/O).
 
 ## Infrastructure Terms
 
@@ -96,9 +96,11 @@ runtime. If that changes, use the AgenticLLM zones:
 For now, all code in this repo is human/framework code. The `references/`
 folder is historical material and is not imported by `main.py`.
 
-## Migration Layout
+## Migration Layout *(planned — none of these directories exist yet)*
 
-Use this as the target shape for new plugin/skill work:
+Use this as the target shape **if** VoiceLLM grows a plugin/skill surface.
+Today there is no `plugins/`, `skills/`, `core/tools/`, or
+`core/runners/` directory in the repo:
 
 ```text
 VoiceLLM/
@@ -127,24 +129,20 @@ VoiceLLM/
 
 ## Current Simpler Shape
 
-VoiceLLM's current production shape is:
+VoiceLLM's current production shape (JROS 0.5 structure) is:
 
 ```text
 VoiceLLM/
-├── core/
-│   ├── bus.py
-│   ├── metrics.py
-│   ├── state.py
-│   ├── runners/orchestrator.py
-│   └── tools/README.md
-├── plugins/
-│   ├── whisper_stt/
-│   ├── kokoro_tts/
-│   ├── llama_cpp_llm/
-│   ├── mlx_llm/
-│   └── llm_core/
-├── audio/
-├── memory/
+├── agent/
+│   ├── orchestrator.py
+│   ├── llm/                 # node.py + backend_base.py
+│   └── adapters/            # llama_cpp/ + mlx/
+├── nodes/
+│   ├── audio_session/       # mic_stream.py + chimes.py
+│   ├── stt/                 # two_pass.py + continuous.py
+│   └── tts/                 # node.py
+├── transport/bus.py
+├── core/                    # metrics.py + state.py
 ├── references/
 └── main.py
 ```

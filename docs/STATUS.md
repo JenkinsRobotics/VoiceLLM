@@ -4,10 +4,14 @@
 [06_milestones.md](06_milestones.md) for the milestone definitions and
 [01_architecture.md](01_architecture.md) for the module/bus layout.
 
-Last updated: **2026-05-17**. Current voice-loop milestone complete. M2
-complete; M3 quick path shipped; M3.5 continuous STT in tree (opt-in via
-`STT_MODE`); LLM-gated speech protocol shipped; both Whisper sizes eager-loaded
-with real warm-up; plugin/runner/memory-oriented folder structure in place.
+Last updated: **2026-06-10**. M2 complete; M3 quick path shipped; M3.5
+continuous STT in tree (opt-in via `STT_MODE`, **still unverified live**);
+LLM-gated speech protocol shipped. Code layout is `agent/` + `nodes/` +
+`transport/` + `core/` (JROS 0.5 structure). June hardening pass: bus is
+real pub/sub fanout, LLM context-overflow guard + spoken error fallback,
+metrics now measure the listen/STT phase, Whisper-hallucination ingress
+filter, farewell detection, mlx stop-marker holdback, config validation,
+13-scenario smoke test.
 
 ---
 
@@ -15,7 +19,7 @@ with real warm-up; plugin/runner/memory-oriented folder structure in place.
 
 Modular, bus-driven local voice assistant on Apple Silicon. All code lives
 at the repo root (this `docs/` folder is a sibling of `config.py`,
-`main.py`, `core/`, `plugins/`, `audio/`, `memory/`).
+`main.py`, `agent/`, `nodes/`, `transport/`, `core/`).
 Demo/reference code that informed the design lives in [references/](../references/)
 and the sibling [MockingAgent/](../../MockingAgent/) repo. The local
 `references/voice_assistant.py` is the proven Google-Home-style baseline we
@@ -50,10 +54,12 @@ TTS) happen at startup with real warm passes — first user turn pays only
 inference time, not setup. Conversation history is capped at
 `MAX_HISTORY_TURNS = 8` user/assistant pairs to keep prompt size bounded.
 
-**Continuation note:** Further advanced work is unlikely to continue in this
-repo. Treat M4 barge-in/AEC, persistent memory, LLM-callable tools, and skills
-as carry-forward ideas for newer AgenticLLM-style frameworks unless this repo is
-explicitly revived.
+**Continuation note:** This repo is in active development (June 2026) as
+the operator's daily voice assistant and the JROS voice-pipeline testbed.
+Next planned work: M4 barge-in (now unblocked — the bus supports multiple
+subscribers), a metrics viewer, and a persona system. Persistent memory /
+LLM-callable tools / skills remain carry-forward ideas, labeled
+*(planned)* where mentioned.
 
 ---
 
@@ -74,14 +80,13 @@ behavior, but every concern is now its own node communicating over the bus.
 | File | Role |
 |---|---|
 | [config.py](../config.py) | All tunables. Flip `LLM_BACKEND` between `"llamacpp"` (default) and `"mlx"`; flip `STT_MODE` between `"two_pass"` (default) and `"continuous"`. |
-| [transport/bus.py](../transport/bus.py) | Single-queue pub/sub (poll-based via `get(timeout)`). |
+| [transport/bus.py](../transport/bus.py) | Pub/sub fanout: `subscribe(topics)` returns a per-subscriber queue; `publish()` never blocks (sheds oldest). `Bus.get()` polls the orchestrator's default catch-all subscription. Invariant: raw mic audio never goes on the bus. |
 | [core/state.py](../core/state.py) | `SysState`: `IDLE`/`THINKING`/`RESPONDING`. |
 | [core/metrics.py](../core/metrics.py) | Per-turn timing → `metrics.csv`. |
 | [nodes/audio_session/mic_stream.py](../nodes/audio_session/mic_stream.py) | `MicStream` with `paused` flag (ported from voice_assistant.py:96-125). |
 | [nodes/audio_session/chimes.py](../nodes/audio_session/chimes.py) | Wake and follow-up earcons, controlled by `CHIMES_ENABLED`, `WAKE_CHIME_ENABLED`, and `FOLLOWUP_CHIME_ENABLED`. |
-| [nodes/audio_session/vad.py](../nodes/audio_session/vad.py), [nodes/audio_session/aec.py](../nodes/audio_session/aec.py), [nodes/audio_session/wakeword.py](../nodes/audio_session/wakeword.py) | Existing — used in M4 (AEC) and legacy references; **not yet wired** into the new flow. |
-| [nodes/stt/two_pass.py](../nodes/stt/two_pass.py) | Two-pass cascade ported from voice_assistant.py: VAD worker, fast (`base.en`) + accurate (`medium.en`) eager-loaded with silence warm-up, wake-word + follow-up window. Publishes `stt.text`. |
-| [nodes/stt/continuous.py](../nodes/stt/continuous.py) | M3.5 hybrid pipeline. Energy-based phrase segmentation, rolling re-transcription. Drop-in interface match for `STTTwoPassNode`. |
+| [nodes/stt/two_pass.py](../nodes/stt/two_pass.py) | Two-pass cascade ported from voice_assistant.py: VAD worker, fast (`base.en`) + accurate (`medium.en`) eager-loaded with silence warm-up, wake-word + follow-up window. Publishes `stt.text` (dict payload with timing). |
+| [nodes/stt/continuous.py](../nodes/stt/continuous.py) | M3.5 hybrid pipeline. Energy-based phrase segmentation, rolling re-transcription. Drop-in interface match for `STTTwoPassNode`. **Unverified live**; also re-transcribes silence continuously in quiet rooms (known inefficiency). |
 | [agent/llm/backend_base.py](../agent/llm/backend_base.py) | `BackendBase` ABC: `load`, `warm`, `stream_chat`, `cancel`. |
 | [agent/adapters/mlx/backend.py](../agent/adapters/mlx/backend.py) | mlx-lm impl. In-stream stop-marker detector for `<end_of_turn>` / `<eos>` / `<im_end>` (replaces the old broken `eot_token` getattr). |
 | [agent/adapters/llama_cpp/backend.py](../agent/adapters/llama_cpp/backend.py) | llama-cpp-python impl. Default backend; chat completion handles Gemma's stop tokens natively. |
@@ -92,12 +97,22 @@ behavior, but every concern is now its own node communicating over the bus.
 
 ### Bus topics in use
 
-- `stt.text` (str) — committed user phrase, post-wake-word.
+- `stt.text` (dict) — committed user phrase, post-wake-word:
+  `{"text": str, "t_speech_start", "t_last_voice", "t_commit",
+  "t_stt_done"}` (perf_counter timestamps; continuous mode omits the
+  first two). Plain-str payloads still accepted (pending-turn refires).
 - `llm.token` (str) — streaming reply delta.
 - `llm.done` (str) — full cleaned reply, fired after the stream ends.
-- `mic.pause` (bool) — TTS toggles this around playback.
+- `llm.error` (str) — generation failed with no usable output; the
+  orchestrator speaks a short fallback. LLMNode already rolled back the
+  user message.
+- `mic.pause` (bool) — TTS toggles this around playback (TTS also calls
+  `stt.set_paused` directly so the pause is synchronous; the bus message
+  feeds the orchestrator's tts_start metric).
 - `tts.audio_chunk` (np.float32) — published before `sd.play()`; nobody
-  consumes it yet (subscriber is **M4** — AEC reference + similarity filter).
+  consumes it yet (subscriber is **M4 (planned)** — AEC reference). Use
+  `bus.subscribe(("tts.audio_chunk",))` to consume without stealing from
+  the orchestrator.
 - `tts.done` (None) — TTS audio queue drained.
 
 ### Models & paths (verified on disk)
@@ -131,13 +146,16 @@ GITHUB/
 └── VoiceLLM/                           # ← THE CODE (flat at the repo root)
     ├── config.py
     ├── main.py
-    ├── audio/  core/  plugins/  memory/
+    ├── smoke_test.py                   # 13 fast scenarios, no model loads
+    ├── agent/                          # orchestrator + llm node + backend adapters
+    ├── nodes/                          # audio_session/ (mic, chimes) + stt/ + tts/
+    ├── transport/                      # bus.py (in-process pub/sub fanout)
+    ├── core/                           # metrics.py + state.py
     ├── references/                     # local copies of pasted reference scripts
     ├── docs/                           # ← these planning docs
     ├── outputs/                        # m3_eval.jsonl etc.
     ├── requirements.txt
     ├── metrics.csv                     # auto-written by MetricsLog
-    ├── models/                         # local model files (mostly symlinks)
     ├── LICENSE
     └── README.md
 ```
@@ -228,19 +246,20 @@ filter+queue can't paper over (e.g. trailing-word loss on long sentences).
 
 Talk over the assistant; it cuts off and listens.
 
-1. **Wire AEC**: `nodes/audio_session/aec.py` exists and `AECWrapper` is already
-   constructed in the *old* orchestrator. The new orchestrator doesn't use
-   it yet. Subscribe to `tts.audio_chunk` for the far-end reference, run
-   the mic frames through AEC before passing them to the VAD.
+1. **Wire AEC**: build a speexdsp wrapper (the old sketch was deleted as
+   dead code 2026-06-10; `references/voice_chat.py` preserves the working
+   experiment). Use `bus.subscribe(("tts.audio_chunk",))` for the far-end
+   reference — the bus supports multiple subscribers now — and run mic
+   frames through AEC before they reach the VAD.
 2. **VAD on cleaned audio** while `state == RESPONDING`: when VAD says
    speech for ≥150 ms, publish `tts.cancel`, call `llm.cancel()`,
    transition `state = LISTENING`. Add a 250 ms start-grace at the top of
    each TTS turn so the speaker click doesn't self-trigger.
-3. **Add `tts.cancel` topic** to the bus contract; route it in the
-   orchestrator's `_dispatch`. `KokoroNode.cancel()` already exists and
-   does the right thing.
-4. **`config.BARGE_IN_ENABLED` and `AEC_ENABLED`** are already wired; flip
-   them on once 1-3 are in.
+3. **Add `tts.cancel` topic (planned)** to the bus contract; route it in
+   the orchestrator's `_dispatch`. `KokoroNode.cancel()` already exists
+   and does the right thing.
+4. **`config.BARGE_IN_ENABLED` and `AEC_ENABLED`** exist as flags but
+   nothing reads them yet; wire them when 1-3 land.
 
 ### M5 — Polish
 
@@ -254,21 +273,22 @@ Talk over the assistant; it cuts off and listens.
 
 ## Known gotchas
 
-1. **`transport/bus.py` is single-consumer.** Only the orchestrator calls
-   `bus.get()`. If we ever want a second subscriber on the same topic
-   (likely in M4: AEC and similarity-filter both need `tts.audio_chunk`),
-   add a `subscribe(topic, cb)` fanout to `Bus`. See
-   [07_open_questions.md §1](07_open_questions.md).
+1. **`transport/bus.py` is pub/sub fanout** (since 2026-06-10): each
+   `subscribe(topics)` call gets its own queue, so M4's AEC can consume
+   `tts.audio_chunk` without stealing messages from the orchestrator.
+   `publish()` never blocks — full subscriber queues shed oldest-first.
+   Invariant: raw mic audio never goes on the bus (it stays on
+   `MicStream.q` / `phrase_q` / `audio_q`).
 2. **TTS publishes `mic.pause` *before* `sd.play()` returns.** The
    orchestrator forwards it to `STTTwoPassNode.set_paused()` which calls
    `MicStream.set_paused()`. Check the exact ordering in
    [nodes/tts/node.py:_play_loop](../nodes/tts/node.py) before tightening
    barge-in timing — there's a `tail_sleep_s = 0.12` to let speakers drain
    before un-pausing the mic.
-3. **The legacy `references/stt_node_legacy.py` and `nodes/audio_session/audio_io.py`** are
-   still in tree but unused. They use `tempfile`-based whisper transcription
-   and a different mic abstraction. Don't import them from new code; either
-   remove or leave as historical reference. Decision deferred to M5.
+3. **Dead modules were deleted 2026-06-10** (`nodes/audio_session/vad.py`,
+   `aec.py`, `wakeword.py`, `audio_io.py` — zero importers; git history
+   has them). `references/` remains historical material that `main.py`
+   never imports.
 4. **`webrtcvad` vs `webrtcvad-wheels`**: requirements.txt asks for
    `-wheels` (prebuilt). The old root requirements named bare `webrtcvad`
    which builds from source. Consistent now.
@@ -322,6 +342,6 @@ python main.py
 3. Read [references/voice_assistant.py](../references/voice_assistant.py) — that
    is the canonical reference for *every* STT/TTS/LLM glue decision in M2.
 4. Read [02_stt_pipelines.md](02_stt_pipelines.md) before touching M3.
-5. Don't refactor the legacy files (`references/stt_node_legacy.py`,
-   `nodes/audio_session/audio_io.py`) —
-   delete them in M5 if they're still unused.
+5. Run `python smoke_test.py` before and after any orchestrator/LLM/bus
+   change — it's fast (no model loads) and covers the failure paths a
+   live session hits.

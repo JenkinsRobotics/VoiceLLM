@@ -3,67 +3,60 @@
 Each milestone is a single runnable command that *demonstrates* a working
 behavior. Don't move on until the previous demo runs reliably.
 
-## M0 — Repo wiring (no behavior change)
+**Status pointer:** M0–M3 shipped (see [STATUS.md](STATUS.md) for the
+authoritative current state); M3.5 is in tree but unverified live; M4/M5
+are planned.
+
+## M0 — Repo wiring (no behavior change) — done
 
 Goal: docs in place, requirements installable, models verified.
 
 - [x] `docs/` written.
-- [ ] `pip install -r requirements.txt` succeeds in a fresh venv.
-  Add to that file: `mlx-lm`, `llama-cpp-python`, `kokoro>=0.9.4`, `scipy`.
-- [ ] Sanity script `docs/check_models.py` (small) prints which model paths
-      exist on this machine and their sizes. Useful before debugging.
+- [x] `pip install -r requirements.txt` succeeds in a fresh venv.
+- [x] Model paths verified (`python -c "import config as c; print(c.GGUF_PATH.exists())"`
+      replaced the planned `docs/check_models.py` script).
 
-Demo: `python -c "from llm.backend_base import BackendBase; print('ok')"`.
+## M1 — Two CLI demos, ported in-place — superseded
 
-## M1 — Two CLI demos, ported in-place
+The planned `demos/` folder was never created; the known-good scripts
+live as historical copies in [references/](../references/) instead
+(`voice_assistant.py` is the regression anchor), and the live backends
+were ported directly into `agent/adapters/`.
 
-Goal: the *known good* MockingAgent demos run from inside VoiceLLM with
-the new module names. No behavior change.
-
-- [ ] `demos/cli_chat_mlx.py` — copy of
-      `MockingAgent/ollamacpp/chat_mlx.py`, points at the same MLX path.
-- [ ] `demos/cli_chat_llamacpp.py` — copy of
-      `MockingAgent/ollamacpp/chat_llama.py`, points at the same GGUF path.
-- [ ] `demos/voice_assistant_baseline.py` — copy of
-      `MockingAgent/voice_assistant.py`. Untouched — this is our regression
-      anchor.
-
-Demo: each script runs and produces a sensible reply.
-
-## M2 — Modular voice assistant, no barge-in
+## M2 — Modular voice assistant, no barge-in — done
 
 Goal: the proven `voice_assistant.py` flow re-expressed through the bus +
 nodes, with **MLX as the default LLM** and Gemma 4 26B-A4B-4bit.
 
-- [ ] `agent/llm/backend_base.py` — `BackendBase` ABC.
-- [ ] `agent/adapters/mlx/backend.py` — extracted from `chat_mlx.py:39-78`.
-- [ ] `agent/adapters/llama_cpp/backend.py` — extracted from `chat_llama.py:39-77`.
-- [ ] `agent/llm/node.py` — rewrite to consume a `BackendBase` instance.
-- [ ] `nodes/tts/node.py` — replace stub synth with real `KPipeline`,
+- [x] `agent/llm/backend_base.py` — `BackendBase` ABC.
+- [x] `agent/adapters/mlx/backend.py` — extracted from `chat_mlx.py:39-78`.
+- [x] `agent/adapters/llama_cpp/backend.py` — extracted from `chat_llama.py:39-77`.
+- [x] `agent/llm/node.py` — rewrite to consume a `BackendBase` instance.
+- [x] `nodes/tts/node.py` — replace stub synth with real `KPipeline`,
       port `clean_for_tts()` and the mic-pause coordination.
-- [ ] `nodes/stt/two_pass.py` — port `voice_assistant.py:127-213` (the
+- [x] `nodes/stt/two_pass.py` — port `voice_assistant.py:127-213` (the
       VAD worker + 2-pass cascade) onto the bus.
-- [ ] `config.py` — add `LLM_BACKEND`, `MLX_PATH`, `GGUF_PATH`,
+- [x] `config.py` — add `LLM_BACKEND`, `MLX_PATH`, `GGUF_PATH`,
       `STT_MODE = "two_pass"`, `KOKORO_VOICE`, voice prompts.
-- [ ] `main.py` — build bus, instantiate backend by config flag,
+- [x] `main.py` — build bus, instantiate backend by config flag,
       start orchestrator.
 
 Demo: `python main.py` reproduces the MockingAgent voice assistant
 behavior, but switching `LLM_BACKEND="llamacpp"` swaps the backend
 without touching anything else.
 
-## M3 — Continuous hearing
+## M3 — Continuous hearing — done (quick path)
 
 Goal: drop the wake word. STT transcribes constantly; any committed phrase
 becomes a turn.
 
-- [ ] `nodes/stt/continuous.py` — port `always_listening_hybrid_phrase_word_pipeline.py`
+- [x] `nodes/stt/continuous.py` — port `always_listening_hybrid_phrase_word_pipeline.py`
       onto the bus (publishes `stt.text` on each commit).
-- [ ] `config.py` flip: `STT_MODE = "continuous"`, `REQUIRE_WAKE_WORD = False`.
-- [ ] `agent/orchestrator.py` — when `REQUIRE_WAKE_WORD = False`, every `stt.text`
+- [x] `config.py` flip: `STT_MODE = "continuous"`, `REQUIRE_WAKE_WORD = False`.
+- [x] `agent/orchestrator.py` — when `REQUIRE_WAKE_WORD = False`, every `stt.text`
       becomes an `llm.request`. Add cooldown so a too-quick second commit
       doesn't double-fire while we're still synthesizing the first reply.
-- [ ] Add `recent_assistant_reply` similarity filter (Layer C in
+- [x] Add `recent_assistant_reply` similarity filter (Layer C in
       `05_barge_in_and_self_speech.md`).
 
 Demo: speak naturally, get a reply, keep talking, get another reply, no
@@ -85,11 +78,15 @@ Goal: interrupt the assistant by talking over it.
 Demo: while the assistant is mid-reply, talk over it. It cuts off within
 ~150 ms and processes the new utterance.
 
-**AEC engine choice:** [audio/aec.py](../audio/aec.py) is sketched against
-[`pyaec`](https://pypi.org/project/pyaec/) (SpeexDSP-based, easy macOS
-wheels). Alternative is [`webrtc-audio-processing`](https://pypi.org/project/webrtc-audio-processing/)
-(WebRTC APM with AEC + NS + AGC, but harder to build). Add the chosen
-package to [requirements.txt](../requirements.txt) when wiring M4.
+**AEC engine choice:** the old speexdsp wrapper sketch was deleted as dead
+code (2026-06-10; recoverable from git history, and
+[references/voice_chat.py](../references/voice_chat.py) preserves the
+working experiment). Candidates remain
+[`speexdsp`](https://pypi.org/project/speexdsp/) /
+[`pyaec`](https://pypi.org/project/pyaec/) (easy macOS wheels) or
+[`webrtc-audio-processing`](https://pypi.org/project/webrtc-audio-processing/)
+(WebRTC APM with AEC + NS + AGC, but harder to build). Wire the far-end
+reference via `bus.subscribe(("tts.audio_chunk",))`.
 
 ## M5 — Polish
 

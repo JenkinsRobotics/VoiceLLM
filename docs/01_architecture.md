@@ -6,10 +6,10 @@ Each concern is a node. Nodes never call each other directly — they
 publish/subscribe to a message bus. That way we can swap any one
 (LLM backend, STT strategy, TTS engine) without rewriting the others.
 
-All code lives at the repo root. Framework infrastructure is under `core/`,
-external integrations are under `plugins/`, reusable audio helpers are under
-`audio/`, future persistent memory is under `memory/`, and historical demos
-live in `references/`.
+All code lives at the repo root. The cognitive layer is under `agent/`,
+peripheral I/O nodes are under `nodes/`, the bus is under `transport/`,
+shared infrastructure (metrics, state) is under `core/`, and historical
+demos live in `references/`.
 
 ## Module map
 
@@ -18,58 +18,58 @@ VoiceLLM/                      # repo root
 ├── config.py                  # central tunables (sample rate, device IDs,
 │                              # backend selection, model paths, prompts)
 ├── main.py                    # build bus + nodes, start orchestrator
+├── smoke_test.py              # 13 fast scenarios, no model loads
 │
-	├── core/
-	│   ├── bus.py                 # pub/sub queue (already present)
-	│   ├── state.py               # IDLE / LISTENING / THINKING / RESPONDING
-	│   ├── metrics.py             # per-turn timing log to metrics.csv
-	│   ├── runners/
-	│   │   └── orchestrator.py    # state machine, wires bus topics to nodes
-	│   └── tools/                 # future LLM-callable tools
+├── agent/                     # cognitive layer
+│   ├── orchestrator.py        # state machine, wires bus topics to nodes
+│   ├── llm/
+│   │   ├── node.py            # LLM bus adapter; owns history + ctx guard
+│   │   └── backend_base.py    # BackendBase ABC (load/warm/stream/cancel)
+│   └── adapters/
+│       ├── llama_cpp/backend.py   # llama-cpp-python backend (default)
+│       └── mlx/backend.py         # mlx-lm backend
 │
-├── audio/
-│   ├── audio_io.py            # sounddevice InputStream → mic frames
-│   ├── vad.py                 # WebRTC VAD segmenter
-│   ├── aec.py                 # optional acoustic echo canceller
-│   └── wakeword.py            # (optional) soft hotword trigger
+├── nodes/                     # peripheral I/O
+│   ├── audio_session/
+│   │   ├── mic_stream.py      # sounddevice InputStream → mic frames
+│   │   └── chimes.py          # wake / follow-up earcons
+│   ├── stt/
+│   │   ├── two_pass.py        # VAD-gated fast→accurate cascade (default)
+│   │   └── continuous.py      # rolling re-transcription (opt-in, unverified)
+│   └── tts/node.py            # Kokoro KPipeline synth + playback threads
 │
-	├── plugins/
-	│   ├── whisper_stt/           # two-pass + continuous Whisper STT nodes
-	│   ├── kokoro_tts/            # Kokoro KPipeline playback node
-	│   ├── llama_cpp_llm/         # llama-cpp-python backend
-	│   ├── mlx_llm/               # mlx-lm backend
-	│   └── llm_core/              # shared LLM bus adapter + BackendBase
-	│
-	├── memory/                    # future persistent memory
+├── transport/bus.py           # in-process pub/sub fanout
+├── core/
+│   ├── state.py               # IDLE / THINKING / RESPONDING
+│   └── metrics.py             # per-turn timing log to metrics.csv
 │
 └── docs/                      # this folder
 ```
 
 ## Bus topics
 
-All cross-node communication goes through `core.bus.Bus.publish(topic, payload)`.
+All cross-node communication goes through
+`transport.bus.Bus.publish(topic, payload)`. Subscribers call
+`bus.subscribe(topics)` for their own queue; the orchestrator holds the
+default catch-all subscription (`bus.get()`). Raw mic audio never goes on
+the bus — it stays on dedicated queues (`MicStream.q`, `phrase_q`,
+`audio_q`).
 
 | Topic | Payload | Producer → Consumer |
 |---|---|---|
-| `mic.frame` | `np.int16` PCM block | audio_io → STT, AEC ref |
-| `mic.pause` | `bool` | TTS → audio_io (gate captures while we speak) |
-| `vad.speech_start` | timestamp | VAD → orchestrator (used for barge-in) |
-| `vad.speech_end` | timestamp | VAD → STT (commit phrase) |
-| `stt.partial` | `str` | STT → orchestrator (live transcript, optional) |
-| `stt.text` | `str` | STT → orchestrator (committed phrase) |
-| `llm.request` | `str` (user text) | orchestrator → LLM |
-| `llm.token` | `str` (delta) | LLM → TTS, orchestrator |
-| `llm.done` | `None` | LLM → orchestrator |
-| `tts.sentence` | `str` | TTS internal (sentence boundary detected) |
-| `tts.audio_chunk` | `np.int16` PCM | TTS → playback, AEC ref |
+| `mic.pause` | `bool` | TTS → orchestrator → STT (also called directly for synchronous pause) |
+| `stt.text` | `dict` (text + timing) | STT → orchestrator (committed phrase) |
+| `llm.token` | `str` (delta) | LLM → orchestrator (gate, then TTS) |
+| `llm.done` | `str` (cleaned reply) | LLM → orchestrator |
+| `llm.error` | `str` | LLM → orchestrator (speaks a fallback) |
+| `tts.audio_chunk` | `np.float32` PCM | TTS → *(planned)* M4 AEC reference |
 | `tts.done` | `None` | TTS → orchestrator |
-| `tts.cancel` | `None` | orchestrator → TTS (barge-in) |
-| `state.change` | new state | orchestrator → everyone (UI/log) |
+| `tts.cancel` | `None` | *(planned)* orchestrator → TTS (M4 barge-in) |
 
 ## Lifecycle
 
 ```
-mic.frame ──► VAD ──► stt.partial / stt.text
+mic frames ──► VAD worker ──► stt.text {text, timing}
                               │
                               ▼
               orchestrator (state machine)
@@ -85,11 +85,12 @@ mic.frame ──► VAD ──► stt.partial / stt.text
 
 States in `core/state.py`:
 - `IDLE` — hearing but no active turn.
-- `LISTENING` — VAD says user is currently speaking, we're accumulating audio.
 - `THINKING` — request sent to LLM, awaiting first token. Also the gate
   decision phase (see "LLM gate" below).
 - `RESPONDING` — gate decided `<reply>`; LLM streaming, TTS speaking.
-- `INTERRUPTED` — barge-in detected; cancel TTS, return to `LISTENING`.
+
+*(planned, M4)*: `LISTENING` (VAD-active accumulation) and `INTERRUPTED`
+(barge-in detected; cancel TTS) — neither exists in code yet.
 
 ## LLM gate
 
@@ -136,19 +137,23 @@ context in the system prompt about when to choose `<ignore>`.
 ## Why a bus and not direct calls
 
 1. We want to swap STT/LLM/TTS independently. Direct calls would couple them.
-2. We want barge-in: a single `tts.cancel` message has to reach TTS without
-   the orchestrator knowing what implementation is currently running.
-3. It makes a future GUI / Slack / log sink trivial — just subscribe.
+2. We want barge-in *(planned, M4)*: a single `tts.cancel` message has to
+   reach TTS without the orchestrator knowing what implementation is
+   currently running.
+3. It makes a future GUI / Slack / log sink trivial — just
+   `bus.subscribe()`.
 
-## What changes from the existing code
+One deliberate exception to "everything over the bus": TTS also calls
+`stt.set_paused` directly (wired in `main.py`) so the mic pause is
+synchronous with playback start — the bus round-trip only lands after the
+orchestrator's next dispatch.
 
-The existing `orchestrator.py` already imports STT, AEC, RingAudio. We will:
+## Threading model
 
-1. Move LLM out of `llm_node.py`'s hard-coded Ollama HTTP call into a
-   `BackendBase`-shaped interface; `llm_node.py` becomes a thin bus
-   adapter that owns one backend instance.
-2. Add a continuous-mode STT alongside the existing VAD-segmented one,
-   selected by `config.STT_MODE`.
-3. Add a `tts.cancel` path through `KokoroNode` so we can interrupt mid-reply.
-4. Replace the synth stub in `kokoro_node.py` with the real `KPipeline`
-   (from MockingAgent's `voice_assistant.py`).
+All orchestrator state is **dispatch-thread-only**: every handler
+(`_on_stt_text`, `_on_llm_token`, `_on_llm_done`, `_on_tts_done`) runs on
+the single thread inside `Orchestrator.run()`. Worker threads (mic
+callback, VAD worker, STT main loop, per-turn LLM thread, TTS synth/play
+threads) communicate with it exclusively via the bus or locked/queued
+structures. Keep it that way — don't mutate orchestrator fields from a
+node thread.

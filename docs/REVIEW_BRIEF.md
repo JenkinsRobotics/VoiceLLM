@@ -141,11 +141,15 @@ VoiceLLM/  (28 py files, single process)
   `FOLLOWUP_WINDOW_S` (15s) so user can chain a follow-up without
   re-saying the wake word.  Chimes mark the open/close of the
   window.
-- **Farewell detection** — if user OR assistant says a farewell
-  ("bye", "goodbye", "see you later", etc., 16 regex patterns in
-  `agent/orchestrator.py:410+`), the orchestrator sets
+- **Farewell detection** — if user AND assistant BOTH say a farewell
+  ("bye", "goodbye", "see you later", etc., 17 regex patterns in
+  `config.py:FAREWELL_PHRASES`; the mirror requirement stops a stray
+  "good night" mid-story from closing the loop), the orchestrator sets
   `_end_of_conversation = True` and skips the follow-up window.
   Conversation ends cleanly.
+  *(Correction 2026-06-10: this brief originally said "user OR
+  assistant" and "16 patterns" — the code has always required both
+  sides, and there are 17.)*
 
 ### Recent commits
 
