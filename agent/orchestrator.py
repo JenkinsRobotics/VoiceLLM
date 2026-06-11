@@ -46,8 +46,22 @@ _RELATED_STOPWORDS = {
     "their", "there", "these", "thing", "think", "those", "what", "when",
     "where", "which", "with", "would", "your",
 }
+_GATE_TAG = re.compile(r"<\s*(ignore|reply)\s*>", re.IGNORECASE)
 _GATE_END_TAG = re.compile(r"</\s*(?:reply|ignore)\s*>", re.IGNORECASE)
 _MAX_GATE_END_TAG_LEN = len("</ignore>")
+
+# Whisper hallucinates bracketed sound descriptions on noise/silence —
+# "[BLANK_AUDIO]", "(clicking)", "♪ music ♪". Dropping them here skips a
+# pointless accurate-STT-plus-LLM round trip per artifact.
+_HALLUCINATION_RE = re.compile(r"^[\[\(\*♪].*[\]\)\*♪]$")
+
+_FAREWELL_PATTERNS = [
+    re.compile(p, re.IGNORECASE) for p in cfg.FAREWELL_PHRASES
+]
+
+
+def _is_farewell(text: str) -> bool:
+    return bool(text) and any(p.search(text) for p in _FAREWELL_PATTERNS)
 
 
 class Orchestrator:
@@ -150,6 +164,11 @@ class Orchestrator:
             text = (payload or "").strip()
             timing = {}
         if not text:
+            return
+
+        if _HALLUCINATION_RE.match(text):
+            print(f"[hallucination dropped] {text!r}", flush=True)
+            self._log_eval(text, "dropped_hallucination")
             return
 
         is_echo, ratio = self._sounds_like_self(text)
@@ -305,12 +324,10 @@ class Orchestrator:
     def _gate_check(self) -> str:
         """Inspect ``self._gate_buffer`` and decide the gate. Returns the
         post-tag tail to forward to TTS when ``<reply>`` is found, or "" otherwise."""
-        lowered = self._gate_buffer.lower()
-        ignore_idx = lowered.find("<ignore>")
-        reply_idx = lowered.find("<reply>")
-
-        # Prefer whichever tag appears first.
-        if ignore_idx != -1 and (reply_idx == -1 or ignore_idx < reply_idx):
+        # Whitespace-tolerant so "< reply >" doesn't fall through to the
+        # fallback and get spoken aloud. First tag wins.
+        m = _GATE_TAG.search(self._gate_buffer)
+        if m and m.group(1).lower() == "ignore":
             self._gate_decided = True
             self._gate_ignore = True
             stt_text = self.cur.stt_text if self.cur else ""
@@ -322,10 +339,10 @@ class Orchestrator:
                 self._log_eval(stt_text, "llm_ignored")
             return ""
 
-        if reply_idx != -1:
+        if m:
             self._gate_decided = True
             self._gate_ignore = False
-            return self._gate_buffer[reply_idx + len("<reply>"):]
+            return self._gate_buffer[m.end():]
 
         if len(self._gate_buffer) >= cfg.LLM_GATE_BUFFER_CHARS:
             # LLM forgot the tag protocol — default to reply.
@@ -430,7 +447,9 @@ class Orchestrator:
                 play_chime("followup")
         # Open a wake-word-free follow-up window for the next utterance.
         # (No-op when REQUIRE_WAKE_WORD = False — STT is already always-on.)
-        if not end_of_conv:
+        # Ignored turns don't re-arm it: ambient chatter shouldn't extend
+        # wake-free listening.
+        if not end_of_conv and not was_ignored:
             self.stt.open_followup()
 
         # M3: drain the pending-turn slot if something arrived mid-turn.
@@ -445,49 +464,3 @@ class Orchestrator:
             else:
                 print(f"[pending dropped age={age:.2f}s] {text!r}", flush=True)
                 self._log_eval(text, "pending_stale", age=age)
-
-
-# ── farewell detection (operator feedback 2026-06-10) ───────────────
-#
-# A small phrase matcher used by _on_llm_done to decide whether the
-# current turn ends the conversation.  When BOTH the user and the
-# agent reply contain a farewell phrase, _on_tts_done skips the
-# followup chime + window — ambient noise after "Good night" should
-# not be solicited for a follow-up.
-#
-# Conservative on purpose: matches whole-word boundaries, common
-# spellings.  Falsely matching inside a long unrelated reply is
-# fine because we require BOTH sides to confirm.
-
-import re as _re
-
-_FAREWELL_PATTERNS = [
-    _re.compile(p, _re.IGNORECASE) for p in (
-        r"\bgood\s*night\b",
-        r"\bg\s?night\b",
-        r"\bgoodbye\b",
-        r"\bgood\s*bye\b",
-        r"\bbye\b",
-        r"\bbye[\s-]*bye\b",
-        r"\bsee\s*you\s*(later|tomorrow|soon|then)\b",
-        r"\bsee\s*ya\b",
-        r"\bcatch\s*you\s*later\b",
-        r"\btalk\s*(to\s*you|to\s*ya)?\s*later\b",
-        r"\bttyl\b",
-        r"\bsleep\s*well\b",
-        r"\bhave\s*a\s*(good|nice|great)\s*(day|night|evening|one|weekend)\b",
-        r"\bfarewell\b",
-        r"\btake\s*care\b",
-        r"\buntil\s*next\s*time\b",
-        r"\bsigning\s*off\b",
-    )
-]
-
-
-def _is_farewell(text: str) -> bool:
-    if not text:
-        return False
-    for pat in _FAREWELL_PATTERNS:
-        if pat.search(text):
-            return True
-    return False

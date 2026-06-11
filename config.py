@@ -116,6 +116,32 @@ FOLLOWUP_WINDOW_S = 15.0
 # the same conversation. The orchestrator also uses this to hint the LLM gate.
 ACTIVE_CONVERSATION_TIMEOUT_S = 15.0
 
+# ── Farewell detection (operator feedback 2026-06-10) ─────────────────
+# When BOTH the user's utterance and the assistant's reply match one of
+# these, the orchestrator suppresses the follow-up chime + window — the
+# conversation has ended and ambient noise shouldn't be solicited for a
+# reply.  Requiring both sides to mirror keeps a stray "good night" in
+# the middle of a story from closing the loop.  Regex, case-insensitive.
+FAREWELL_PHRASES = (
+    r"\bgood\s*night\b",
+    r"\bg\s?night\b",
+    r"\bgoodbye\b",
+    r"\bgood\s*bye\b",
+    r"\bbye\b",
+    r"\bbye[\s-]*bye\b",
+    r"\bsee\s*you\s*(later|tomorrow|soon|then)\b",
+    r"\bsee\s*ya\b",
+    r"\bcatch\s*you\s*later\b",
+    r"\btalk\s*(to\s*you|to\s*ya)?\s*later\b",
+    r"\bttyl\b",
+    r"\bsleep\s*well\b",
+    r"\bhave\s*a\s*(good|nice|great)\s*(day|night|evening|one|weekend)\b",
+    r"\bfarewell\b",
+    r"\btake\s*care\b",
+    r"\buntil\s*next\s*time\b",
+    r"\bsigning\s*off\b",
+)
+
 # ── M3 continuous-mode guards ──────────────────────────────────────────
 # Self-speech filter: if an STT commit is >= this similar to the most
 # recent assistant reply, drop it. Catches the residual cases where the

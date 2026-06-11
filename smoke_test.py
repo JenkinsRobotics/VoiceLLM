@@ -95,7 +95,7 @@ def main() -> int:
 
     assert tts.spoken == ""
     assert len(llm.history_snapshot()) == 1
-    assert stt.followups == 1
+    assert stt.followups == 0  # ignored turns must not re-arm the followup window
     assert clean_for_tts("<reply>Hello there.") == "Hello there."
     assert clean_for_tts("<reply>Hello there.</reply>") == "Hello there."
     assert clean_for_tts("<ignore>") == ""
