@@ -140,8 +140,15 @@ class Orchestrator:
 
     # ── Handlers ───────────────────────────────────────────────────────
 
-    def _on_stt_text(self, text: str) -> None:
-        text = (text or "").strip()
+    def _on_stt_text(self, payload) -> None:
+        # STT nodes publish a dict with timing; plain strings still work
+        # (pending-turn refires, tests).
+        if isinstance(payload, dict):
+            text = (payload.get("text") or "").strip()
+            timing = payload
+        else:
+            text = (payload or "").strip()
+            timing = {}
         if not text:
             return
 
@@ -162,7 +169,7 @@ class Orchestrator:
 
         addressed_hint = self._is_active_conversation() or self._looks_related(text)
         self._log_eval(text, "accepted", addressed_hint=addressed_hint)
-        self._start_turn(text, addressed_hint=addressed_hint)
+        self._start_turn(text, addressed_hint=addressed_hint, timing=timing)
 
     def _start_turn(
         self,
@@ -170,11 +177,16 @@ class Orchestrator:
         *,
         addressed_hint: bool = False,
         retrying_ignore: bool = False,
+        timing: dict | None = None,
     ) -> None:
+        timing = timing or {}
+        t = now()
         self.cur = TurnMetrics()
-        self.cur.wake_ts = now()
+        self.cur.wake_ts = timing.get("t_speech_start") or t
         self.cur.listen_start_ts = self.cur.wake_ts
-        self.cur.listen_end_ts = now()
+        self.cur.last_voice_ts = timing.get("t_last_voice") or 0.0
+        self.cur.commit_ts = timing.get("t_commit") or 0.0
+        self.cur.stt_done_ts = timing.get("t_stt_done") or t
         self.cur.stt_text = text
         self._turn_addressed_hint = addressed_hint
         self._turn_retrying_ignore = retrying_ignore

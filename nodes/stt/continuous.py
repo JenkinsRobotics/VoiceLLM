@@ -37,6 +37,7 @@ from difflib import SequenceMatcher
 import numpy as np
 
 import config as cfg
+from core.metrics import now as t_now
 from nodes.audio_session.chimes import ChimePlayer
 from nodes.audio_session.mic_stream import MicStream
 
@@ -278,6 +279,7 @@ class STTContinuousNode:
     def _close_phrase(self) -> None:
         # One last transcription pass — captures any words spoken between
         # the most recent rolling pass and the silence that closed the phrase.
+        t_commit = t_now()
         audio = self._current_phrase_audio()
         text = self._transcribe(audio) if audio is not None else self._current_text
         text = (text or "").strip()
@@ -293,20 +295,22 @@ class STTContinuousNode:
             return
         self._last_committed_text = text
 
-        self._publish(text)
+        # This node can't pinpoint speech onset / last voiced frame (energy
+        # gating, no per-frame VAD) — publish the timestamps it does know.
+        self._publish(text, {"t_commit": t_commit, "t_stt_done": t_now()})
 
-    def _publish(self, text: str) -> None:
+    def _publish(self, text: str, timing: dict) -> None:
         print(f"[heard]  {text!r}", flush=True)
 
         if not self.require_wake_word:
-            self.bus.publish("stt.text", text)
+            self.bus.publish("stt.text", {"text": text, **timing})
             return
 
         if time.time() <= self._followup_deadline:
             self._followup_deadline = 0.0
-            self.bus.publish("stt.text", text)
+            self.bus.publish("stt.text", {"text": text, **timing})
             return
 
         command = self._extract_command(text)
         if command:
-            self.bus.publish("stt.text", command)
+            self.bus.publish("stt.text", {"text": command, **timing})

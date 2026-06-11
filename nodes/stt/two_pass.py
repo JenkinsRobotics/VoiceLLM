@@ -26,6 +26,7 @@ import numpy as np
 import webrtcvad
 
 import config as cfg
+from core.metrics import now
 from nodes.audio_session.chimes import ChimePlayer
 from nodes.audio_session.mic_stream import MicStream
 
@@ -87,7 +88,7 @@ class _VadWorker(threading.Thread):
         pcm = (chunk[:, 0] * 32767).clip(-32768, 32767).astype(np.int16).tobytes()
         return self.vad.is_speech(pcm, self.sample_rate)
 
-    def _finalize(self, chunks: list[np.ndarray]) -> None:
+    def _finalize(self, chunks: list[np.ndarray], timing: dict) -> None:
         audio = np.concatenate(chunks, axis=0).astype(np.float32).reshape(-1)
         # Trailing silence so Whisper doesn't clip the last word.
         audio = np.concatenate([audio, np.zeros(self.post_pad_samples, dtype=np.float32)])
@@ -98,7 +99,7 @@ class _VadWorker(threading.Thread):
             print(f"[stt-fast] {exc}", file=sys.stderr)
             text = ""
         if text:
-            self.phrase_q.put((audio, text))
+            self.phrase_q.put((audio, text, timing))
 
     def run(self) -> None:
         pre_roll: collections.deque[np.ndarray] = collections.deque(
@@ -108,6 +109,8 @@ class _VadWorker(threading.Thread):
         speech_blocks = 0
         silent_blocks = 0
         in_speech = False
+        t_speech_start = 0.0
+        t_last_voice = 0.0
 
         while not self.stop_event.is_set():
             try:
@@ -120,12 +123,17 @@ class _VadWorker(threading.Thread):
             if is_speech:
                 if not in_speech:
                     speech = list(pre_roll)
-                    speech_blocks = len(speech)
+                    # Pre-roll is context for Whisper, not speech evidence —
+                    # don't let it count toward min/short-phrase thresholds.
+                    speech_blocks = 0
                     silent_blocks = 0
                     in_speech = True
+                    # Onset = now minus whatever pre-roll we grafted on.
+                    t_speech_start = now() - len(speech) * self.frame_ms / 1000.0
                 speech.append(chunk)
                 speech_blocks += 1
                 silent_blocks = 0
+                t_last_voice = now()
             elif in_speech:
                 speech.append(chunk)
                 silent_blocks += 1
@@ -158,7 +166,11 @@ class _VadWorker(threading.Thread):
                 )
             )
             if phrase_done:
-                self._finalize(speech)
+                self._finalize(speech, {
+                    "t_speech_start": t_speech_start,
+                    "t_last_voice": t_last_voice,
+                    "t_commit": now(),
+                })
                 speech = []
                 speech_blocks = 0
                 silent_blocks = 0
@@ -351,7 +363,7 @@ class STTTwoPassNode:
                 self._state = "WAKE"
 
             try:
-                audio, fast_text = self.phrase_q.get(timeout=0.3)
+                audio, fast_text, timing = self.phrase_q.get(timeout=0.3)
             except queue.Empty:
                 continue
 
@@ -386,7 +398,7 @@ class STTTwoPassNode:
                     with self.phrase_q.mutex:
                         self.phrase_q.queue.clear()
                     try:
-                        cmd_audio, cmd_fast = self.phrase_q.get(timeout=6.0)
+                        cmd_audio, cmd_fast, timing = self.phrase_q.get(timeout=6.0)
                     except queue.Empty:
                         print("[no command — back to wake]", flush=True)
                         continue
@@ -399,4 +411,8 @@ class STTTwoPassNode:
             # Going into THINKING — pre-emptively close the follow-up window
             # so a slow TTS doesn't get a stale "still listening" feel.
             self._state = "WAKE"
-            self.bus.publish("stt.text", command)
+            self.bus.publish("stt.text", {
+                "text": command,
+                **timing,
+                "t_stt_done": now(),
+            })
