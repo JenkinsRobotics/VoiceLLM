@@ -12,6 +12,35 @@ from typing import Iterator
 
 from agent.llm.backend_base import BackendBase
 
+# Gemma's chat template ends each assistant turn with <end_of_turn>.
+# mlx-lm only stops on the tokenizer's eos_token_id by default, which is
+# <eos> (session end), not <end_of_turn>. Without an in-stream check the
+# model runs to max_tokens and starts looping. The TokenizerWrapper API
+# for adding additional EOS varies by version, so we watch the streamed
+# text and stop when we see a marker.
+STOP_MARKERS = ("<end_of_turn>", "<|im_end|>", "<eos>")
+_MAX_HOLDBACK = max(len(m) for m in STOP_MARKERS) - 1
+
+
+def _scan_stream_text(pending: str, text: str) -> tuple[str, str, bool]:
+    """Scan ``pending + text`` for stop markers. Returns
+    ``(emit, new_pending, stopped)``.
+
+    Any trailing run that is a prefix of a marker is held back in
+    ``new_pending`` rather than emitted — otherwise a marker straddling
+    two deltas leaks its already-emitted head ("<end_of") into TTS, which
+    Kokoro reads aloud.
+    """
+    out = pending + text
+    idxs = [i for i in (out.find(m) for m in STOP_MARKERS) if i != -1]
+    if idxs:
+        return out[:min(idxs)], "", True
+    for k in range(min(len(out), _MAX_HOLDBACK), 0, -1):
+        suffix = out[-k:]
+        if any(m.startswith(suffix) for m in STOP_MARKERS):
+            return out[:-k], suffix, False
+    return out, "", False
+
 
 class MLXBackend(BackendBase):
     def __init__(self, model_path: str | Path) -> None:
@@ -47,7 +76,13 @@ class MLXBackend(BackendBase):
         try:
             from mlx_lm.sample_utils import make_sampler
             return make_sampler(temp=temperature, top_p=top_p)
-        except Exception:
+        except Exception as exc:
+            # Don't silently diverge from the llama.cpp backend's sampling.
+            print(
+                f"[mlx-lm] sampler unavailable ({exc}) — temperature/top_p "
+                "ignored, using mlx-lm defaults",
+                flush=True,
+            )
             return None
 
     def stream_chat(
@@ -70,37 +105,20 @@ class MLXBackend(BackendBase):
         if sampler is not None:
             kwargs["sampler"] = sampler
 
-        # Gemma's chat template ends each assistant turn with <end_of_turn>.
-        # mlx-lm only stops on the tokenizer's eos_token_id by default, which
-        # is <eos> (session end), not <end_of_turn>. Without this check the
-        # model runs to max_tokens and starts looping. The TokenizerWrapper
-        # API for adding additional EOS varies by version, so we just watch
-        # the streamed text and stop when we see the marker.
-        STOP_MARKERS = ("<end_of_turn>", "<|im_end|>", "<eos>")
-        buffered = ""
+        pending = ""
         for resp in stream_generate(self.model, self.tokenizer, prompt=prompt, **kwargs):
             if self.stop_event.is_set():
-                break
+                return
             text = resp.text
             if not text:
                 continue
 
-            # Detect stop markers that may straddle a token boundary by
-            # buffering the last few chars across yields.
-            buffered = (buffered + text)[-32:]
-            stop_at = -1
-            for marker in STOP_MARKERS:
-                idx = buffered.find(marker)
-                if idx != -1:
-                    # Compute where the marker starts within the *current* delta.
-                    overlap = len(buffered) - len(text)
-                    stop_at = max(0, idx - overlap)
-                    break
+            emit, pending, stopped = _scan_stream_text(pending, text)
+            if emit:
+                yield emit
+            if stopped:
+                return
 
-            if stop_at >= 0:
-                head = text[:stop_at]
-                if head:
-                    yield head
-                break
-
-            yield text
+        # Stream ended with a held-back partial that never became a marker.
+        if pending:
+            yield pending
