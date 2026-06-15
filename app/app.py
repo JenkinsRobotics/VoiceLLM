@@ -193,6 +193,14 @@ class JaegerApp:
     def _start_nodes(self) -> None:
         self.supervisor = Supervisor(health=self.health, bus=self.bus)
         for node_spec in self.spec.nodes:
+            # Skip disabled nodes entirely — no handle, no factory
+            # resolve. This lets a manifest carry descriptive-only
+            # [[node]] entries (declaring the topology without
+            # requiring the chassis to import their factories).
+            # VoiceLLM caught this in Phase C; upstream to
+            # jaeger_app_framework next.
+            if not node_spec.enabled:
+                continue
             self.supervisor.add(self._make_handle(node_spec))
         self.supervisor.start_all()
 

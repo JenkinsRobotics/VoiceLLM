@@ -50,7 +50,7 @@ backend = "thread"
 factory = "agent.orchestrator:make_node"     # (planned — Phase C wires)
 restart = "never"
 config_key = "orchestrator"
-enabled = true
+enabled = false   # chassis Supervisor doesn't manage VoiceLLM's nodes
 
 [[node]]
 id = "llm"
@@ -59,7 +59,7 @@ backend = "thread"
 factory = "agent.llm:make_node"              # (planned — Phase C wires)
 restart = "on_failure"
 config_key = "llm"
-enabled = true
+enabled = false   # chassis Supervisor doesn't manage VoiceLLM's nodes
 
 [[node]]
 id = "tts"
@@ -68,7 +68,7 @@ backend = "thread"
 factory = "nodes.tts:make_node"              # (planned — Phase C wires)
 restart = "on_failure"
 config_key = "tts"
-enabled = true
+enabled = false   # chassis Supervisor doesn't manage VoiceLLM's nodes
 
 [[node]]
 id = "stt"
@@ -77,7 +77,7 @@ backend = "thread"
 factory = "nodes.stt:make_node"              # (planned — Phase C wires)
 restart = "on_failure"
 config_key = "stt"
-enabled = true
+enabled = false   # chassis Supervisor doesn't manage VoiceLLM's nodes
 
 # ── Surfaces ──────────────────────────────────────────────────────
 # VoiceLLM has no GUI surfaces — it's a terminal-only voice agent.

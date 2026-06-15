@@ -1,7 +1,24 @@
-"""VoiceLLM entrypoint — wire the bus, build nodes, run the orchestrator."""
+"""VoiceLLM entrypoint — wire the bus, build nodes, run the orchestrator.
+
+Phase C (2026-06-14): boots through the Jaeger app format 0.1 chassis
+for slot + atexit + signal handling, then continues to drive the
+orchestrator's own loop. The chassis Supervisor doesn't manage
+VoiceLLM's nodes (they're not chassis-Node-shaped — no .run() lifecycle
+on LLMNode/KokoroNode/STT nodes; the Orchestrator owns the turn loop
+directly). What the chassis gives us:
+
+  * single-instance slot at .run/voicellm.pid — a second
+    `python main.py` refuses with the running PID named, before any
+    16 GB model load happens
+  * atexit teardown — bus close + slot release run reliably on any
+    exit path
+  * signal handler — SIGTERM/SIGINT trigger chassis shutdown
+  * one log line confirming this process became a voicellm instance
+"""
 
 from __future__ import annotations
 
+import pathlib
 import sys
 
 import config as cfg
@@ -14,6 +31,8 @@ from agent.llm.node import LLMNode
 from agent.adapters.mlx.backend import MLXBackend
 from nodes.stt.continuous import STTContinuousNode
 from nodes.stt.two_pass import STTTwoPassNode
+
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parent
 
 
 def make_backend() -> BackendBase:
@@ -75,7 +94,31 @@ def make_stt(bus: Bus):
     raise NotImplementedError(f"STT_MODE={cfg.STT_MODE!r} not implemented yet")
 
 
+def _boot_chassis() -> int:
+    """Take the chassis single-instance slot + register atexit
+    teardown. Manifest sets event_loop = "none" and every [[node]] /
+    [[surface]] enabled = false, so JaegerApp.boot returns
+    immediately after the slot + signal handlers + atexit are wired —
+    the orchestrator keeps owning the turn loop. Returns 0 on success,
+    non-zero if another voicellm is already running.
+    """
+    from app import JaegerApp
+    from app.app import SecondInstanceError
+    try:
+        JaegerApp(PROJECT_ROOT).boot()
+    except SecondInstanceError as exc:
+        print(f"voicellm: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main() -> int:
+    # Boot the chassis FIRST — slot acquisition refuses a second
+    # launch loudly before any 16 GB model load is paid for.
+    rc = _boot_chassis()
+    if rc:
+        return rc
+
     bus = Bus()
 
     # Backend + LLM node first — the load+warm pause is several seconds and
