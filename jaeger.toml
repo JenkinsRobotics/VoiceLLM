@@ -1,0 +1,86 @@
+# VoiceLLM — Jaeger app format manifest (format 0.1)
+#
+# Phase B (additive, descriptive). main.py still boots through the
+# existing flow (Bus → backend → LLMNode → KokoroNode → STT node →
+# Orchestrator.run()); this manifest is not consumed at runtime
+# until Phase C rebases main.py onto JaegerApp.
+#
+# VoiceLLM is a fused-mode CLI agent (like Hermes) — no GUI, no
+# windows. The orchestrator runs in the foreground; closing the
+# terminal quits everything. The chassis-arrival (Phase A) added
+# app/ + tests/test_app_format.py; Phase C wires the make_*_node
+# factories below and replaces the existing Bus/Orchestrator boot
+# with JaegerApp(root).run().
+
+[app]
+name = "voicellm"
+version = "0.1.0"
+requires_framework = ">=0.1"
+mode = "fused"                # CLI agent, single process
+event_loop = "none"           # Orchestrator owns the main loop; the
+                              # chassis returns after boot phase 6
+ui = "tui"                    # text-only — terminal print() output
+single_instance = true        # no two voice loops on one mic
+autostart = false
+shell_quits_core = true       # close terminal = quit everything
+config = ""                   # VoiceLLM uses a Python config module
+                              # (config.py at root), not a YAML file —
+                              # empty string skips the chassis config
+                              # loader cleanly (0.1 patch).
+
+# Bus — InProcBus. VoiceLLM's existing transport/bus.py provides the
+# same shape; J5C-equivalent will collapse them into one chassis bus.
+[bus]
+backend = "inproc"
+
+# ── Nodes ─────────────────────────────────────────────────────────
+# Four tier-3 nodes (per JROS's tier model): two real-time audio
+# nodes (stt + tts) and one compute node (llm). audio_session/ in
+# the existing tree contains helpers (chimes, mic_stream) that the
+# stt/tts nodes use — not standalone nodes.
+#
+# The Orchestrator (agent/orchestrator.py) is the tier-1 cognitive
+# coordinator — same role as JROS's main agent. Phase C declares it
+# as a [[node]] with tier = 1 + restart = "never".
+
+[[node]]
+id = "orchestrator"
+tier = 1                      # the agent's identity — restart=never
+backend = "thread"
+factory = "agent.orchestrator:make_node"     # (planned — Phase C wires)
+restart = "never"
+config_key = "orchestrator"
+enabled = true
+
+[[node]]
+id = "llm"
+tier = 3
+backend = "thread"
+factory = "agent.llm:make_node"              # (planned — Phase C wires)
+restart = "on_failure"
+config_key = "llm"
+enabled = true
+
+[[node]]
+id = "tts"
+tier = 3
+backend = "thread"
+factory = "nodes.tts:make_node"              # (planned — Phase C wires)
+restart = "on_failure"
+config_key = "tts"
+enabled = true
+
+[[node]]
+id = "stt"
+tier = 3
+backend = "thread"
+factory = "nodes.stt:make_node"              # (planned — Phase C wires)
+restart = "on_failure"
+config_key = "stt"
+enabled = true
+
+# ── Surfaces ──────────────────────────────────────────────────────
+# VoiceLLM has no GUI surfaces — it's a terminal-only voice agent.
+# The chassis's SurfaceManager has nothing to start; event_loop="none"
+# means the chassis returns after boot and the orchestrator runs the
+# main loop directly.
