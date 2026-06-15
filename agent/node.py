@@ -11,7 +11,7 @@ import re
 import sys
 import threading
 
-from .backend_base import BackendBase
+from .adapters.base import BackendBase
 
 
 def clean_for_tts(text: str) -> str:

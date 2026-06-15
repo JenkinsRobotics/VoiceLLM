@@ -151,7 +151,7 @@ VoiceLLM/
 │   ├── state.py               # process state
 │   └── metrics.py             # per-turn timing
 │
-├── ASSETS/                    # chimes, packaged audio
+├── assets/                    # chimes, packaged audio
 ├── references/                # pasted historical scripts, not imported
 ├── docs/                      # architecture / milestones / status
 ├── outputs/                   # m3_eval.jsonl (runtime decision log)

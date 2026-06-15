@@ -26,8 +26,8 @@ from transport.bus import Bus
 from agent.orchestrator import Orchestrator
 from nodes.tts.node import KokoroNode
 from agent.adapters.llama_cpp.backend import LlamaCppBackend
-from agent.llm.backend_base import BackendBase
-from agent.llm.node import LLMNode
+from agent.adapters.base import BackendBase
+from agent.node import LLMNode
 from agent.adapters.mlx.backend import MLXBackend
 from nodes.stt.continuous import STTContinuousNode
 from nodes.stt.two_pass import STTTwoPassNode

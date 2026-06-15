@@ -5,5 +5,5 @@ Orchestrator coordinates STT → LLM → TTS turns over the bus.
 """
 
 from .orchestrator import Orchestrator  # noqa: F401
-from .llm.node import LLMNode  # noqa: F401
-from .llm.backend_base import BackendBase  # noqa: F401
+from .node import LLMNode  # noqa: F401
+from .adapters.base import BackendBase  # noqa: F401

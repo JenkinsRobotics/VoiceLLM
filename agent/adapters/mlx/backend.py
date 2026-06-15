@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Iterator
 
-from agent.llm.backend_base import BackendBase
+from agent.adapters.base import BackendBase
 
 # Gemma's chat template ends each assistant turn with <end_of_turn>.
 # mlx-lm only stops on the tokenizer's eos_token_id by default, which is

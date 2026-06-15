@@ -18,8 +18,8 @@ from transport.bus import Bus
 from core.metrics import MetricsLog
 from agent.orchestrator import Orchestrator
 from core.state import SysState
-from agent.llm.backend_base import BackendBase
-from agent.llm.node import LLMNode, clean_for_tts
+from agent.adapters.base import BackendBase
+from agent.node import LLMNode, clean_for_tts
 from agent.adapters.mlx.backend import _scan_stream_text
 
 
