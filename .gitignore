@@ -41,3 +41,8 @@ dist/
 metrics.csv
 outputs/
 metrics.csv.old
+
+# Chassis runtime
+app/__pycache__/
+tests/__pycache__/
+.run/
