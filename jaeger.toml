@@ -1,16 +1,14 @@
 # VoiceLLM — Jaeger app format manifest (format 0.1)
 #
-# Phase B (additive, descriptive). main.py still boots through the
-# existing flow (Bus → backend → LLMNode → KokoroNode → STT node →
-# Orchestrator.run()); this manifest is not consumed at runtime
-# until Phase C rebases main.py onto JaegerApp.
+# ─────────────────────────────────────────────────────────────────
+#  PATTERN 0 — pure CLI tool (Jenkins Robotics standard, 2026-06-14)
+# ─────────────────────────────────────────────────────────────────
+#  Runs in a terminal. Closing the terminal quits the app. No GUI,
+#  no tray, no windows. Same shape as Hermes, Claude Code, ollama
+#  CLI. The orchestrator owns the main loop directly.
 #
-# VoiceLLM is a fused-mode CLI agent (like Hermes) — no GUI, no
-# windows. The orchestrator runs in the foreground; closing the
-# terminal quits everything. The chassis-arrival (Phase A) added
-# app/ + tests/test_app_format.py; Phase C wires the make_*_node
-# factories below and replaces the existing Bus/Orchestrator boot
-# with JaegerApp(root).run().
+# Phases A-C landed: chassis copy + manifest + main.py rebased onto
+# JaegerApp.boot() for single-instance slot + atexit teardown.
 
 [app]
 name = "voicellm"
